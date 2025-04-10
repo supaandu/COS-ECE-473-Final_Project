@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Portfolio Rebalancer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@100..900&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <header class="text-center mb-5">
+            <h1>AI-Powered Token Portfolio Rebalancer</h1>
+            <p class="lead">Connect your wallet, detect your tokens, and get rebalancing suggestions</p>
+        </header>
+
+        <div class="row">
+            <div class="col-md-12 mb-4">
+                <div class="card shadow">
+                    <div class="card-body">
+                        <h3>Wallet Connection</h3>
+                        <div id="wallet-status" class="alert alert-secondary">
+                            Not connected to MetaMask
+                        </div>
+                        <button id="connect-wallet" class="btn btn-primary">Connect MetaMask</button>
+                        <button id="disconnect-wallet" class="btn btn-outline-danger d-none">Disconnect</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="portfolio-section" class="d-none">
+            <div class="row">
+                <div class="col-md-6 mb-4">
+                    <div class="card shadow">
+                        <div class="card-header bg-primary text-white">
+                            <h3 class="mb-0">Your Portfolio</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="loading-portfolio" class="text-center">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p>Detecting tokens...</p>
+                            </div>
+                            <div id="portfolio-content" class="d-none">
+                                <h4>Detected Tokens</h4>
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Token</th>
+                                            <th>Balance</th>
+                                            <th>USD Value</th>
+                                            <th>Current %</th>
+                                            <th>Target %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tokens-table">
+                                        <!-- Token rows will be added here -->
+                                    </tbody>
+                                </table>
+                                <div class="text-end">
+                                    <strong>Total Value: $<span id="total-value">0.00</span></strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6 mb-4">
+                    <div class="card shadow">
+                        <div class="card-header bg-success text-white">
+                            <h3 class="mb-0">Target Allocation</h3>
+                        </div>
+                        <div class="card-body">
+                            <p>Set your target allocation percentages for each token. Total must equal 100%.</p>
+                            <div id="allocation-form">
+                                <!-- Target allocation inputs will be added here -->
+                            </div>
+                            <div class="mt-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span>Total: <span id="allocation-total">0</span>%</span>
+                                    <button id="calculate-rebalance" class="btn btn-success" disabled>Calculate Rebalance</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-12 mb-4">
+                    <div class="card shadow d-none" id="rebalance-card">
+                        <div class="card-header bg-info text-white">
+                            <h3 class="mb-0">Rebalancing Suggestions</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="rebalance-results">
+                                <!-- Rebalancing suggestions will be displayed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for adding custom tokens -->
+    <div class="modal fade" id="addTokenModal" tabindex="-1" aria-labelledby="addTokenModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addTokenModalLabel">Add Custom Token</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="tokenAddress" class="form-label">Token Contract Address</label>
+                        <input type="text" class="form-control" id="tokenAddress" placeholder="0x...">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="addTokenBtn">Add Token</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.8.0/dist/web3.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+body {
+    background-color: #f5f8fa;
+    font-family: 'Geologica', sans-serif;
+}
+
+h1 {
+    font-family: 'Silkscreen', sans-serif;
+}
+.card {
+    border-radius: 10px;
+    overflow: hidden;
+    border: none;
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card-header {
+    font-weight: 600;
+}
+
+#portfolio-section {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+.token-row {
+    transition: background-color 0.3s;
+}
+
+.token-row:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+.rebalance-action {
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background-color: #f8f9fa;
+    border-left: 4px solid;
+}
+
+.rebalance-action.buy {
+    border-left-color: #28a745;
+}
+
+.rebalance-action.sell {
+    border-left-color: #dc3545;
+}
+
+.action-icon {
+    font-size: 1.2rem;
+    margin-right: 10px;
+}
+
+#connect-wallet {
+    background: linear-gradient(45deg, #7b3fe4, #5e72e4);
+    border: none;
+}
+
+.allocation-input {
+    max-width: 80px;
+}
+
+#rebalance-explanation {
+    background-color: #f8f9fa;
+    border-left: 4px solid #17a2b8;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.progress {
+    height: 10px;
+    margin-top: 5px;
+}
+
+.current-allocation {
+    position: relative;
+    height: 20px;
+}
+
+.current-marker {
+    position: absolute;
+    width: 2px;
+    height: 20px;
+    background-color: #343a40;
+    top: 0;
+}
+
+.token-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+}
