@@ -262,7 +262,7 @@ def calculate_rebalance():
     
     # Calculate current allocation percentages
     current_allocation = {
-        token: (tokens[token]['balance'] * token_prices[token]) / total_value * 100
+        token: (tokens[token]['balance'] * token_prices[token]) / total_value * 100 if total_value != 0 else 0
         for token in tokens
     }
     
