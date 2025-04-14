@@ -2,12 +2,17 @@ import os
 import json
 import requests
 import time
+import re
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from web3 import Web3
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
+
+# Initialize OpenAI client
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -207,89 +212,170 @@ def detect_tokens():
 
 @app.route('/api/calculate_rebalance', methods=['POST'])
 def calculate_rebalance():
-    data = request.json
-    if not data.get('tokens') or not data.get('target_allocation'):
-        return jsonify({'error': 'Missing tokens or target allocation data'}), 400
-    
-    tokens = data['tokens']
-    target_allocation = data['target_allocation']
-    
-    # Get token prices from CoinGecko
-    token_prices = {}
-    
-    # Get ETH price
     try:
-        eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd').json()
-        token_prices['ETH'] = eth_response['ethereum']['usd']
-    except Exception as e:
-        print(f"Error fetching ETH price: {e}")
-        token_prices['ETH'] = 1500  # Fallback price
-    
-    # For all other tokens, try to get prices from CoinGecko
-    # First, collect CoinGecko IDs or contract addresses
-    token_addresses = []
-    for symbol, token_data in tokens.items():
-        if symbol != 'ETH' and token_data.get('address'):
-            token_addresses.append(token_data['address'].lower())
-    
-    if token_addresses:
-        try:
-            # Use CoinGecko contract address endpoint
-            addresses_str = ','.join(token_addresses)
-            token_response = requests.get(
-                f'https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses={addresses_str}&vs_currencies=usd'
-            ).json()
+        data = request.json
+        print(f"[DEBUG] /api/calculate_rebalance received data: {data}")
+        
+        if not data:
+            return jsonify({'error': 'No data received'}), 400
             
-            # Process response and map back to symbols
-            for symbol, token_data in tokens.items():
-                if symbol != 'ETH' and token_data.get('address'):
-                    address_key = token_data['address'].lower()
-                    if address_key in token_response and 'usd' in token_response[address_key]:
-                        token_prices[symbol] = token_response[address_key]['usd']
-                    else:
-                        # If price not found, use fallback
-                        token_prices[symbol] = 1.0  # Fallback price
+        if not data.get('tokens'):
+            return jsonify({'error': 'Missing tokens data'}), 400
+            
+        if not data.get('target_allocation'):
+            return jsonify({'error': 'Missing target allocation data'}), 400
+        
+        tokens = data['tokens']
+        target_allocation = data['target_allocation']
+        
+        print(f"[DEBUG] Tokens: {tokens}")
+        print(f"[DEBUG] Target allocation: {target_allocation}")
+        
+        # Get token prices from CoinGecko
+        token_prices = {}
+        
+        # Get ETH price
+        try:
+            eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd').json()
+            token_prices['ETH'] = eth_response['ethereum']['usd']
         except Exception as e:
-            print(f"Error fetching token prices: {e}")
+            print(f"Error fetching ETH price: {e}")
+            token_prices['ETH'] = 1500  # Fallback price
     
-    # Add fallback prices for any tokens that weren't found
-    for symbol in tokens:
-        if symbol not in token_prices:
-            token_prices[symbol] = 1.0  # Fallback price
+        # For all other tokens, try to get prices from CoinGecko
+        # First, collect CoinGecko IDs or contract addresses
+        token_addresses = []
+        for symbol, token_data in tokens.items():
+            if symbol != 'ETH' and token_data.get('address'):
+                token_addresses.append(token_data['address'].lower())
     
-    # Calculate total portfolio value
-    total_value = sum(tokens[token]['balance'] * token_prices[token] for token in tokens)
+        if token_addresses:
+            try:
+                # Use CoinGecko contract address endpoint
+                addresses_str = ','.join(token_addresses)
+                token_response = requests.get(
+                    f'https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses={addresses_str}&vs_currencies=usd'
+                ).json()
+                
+                # Process response and map back to symbols
+                for symbol, token_data in tokens.items():
+                    if symbol != 'ETH' and token_data.get('address'):
+                        address_key = token_data['address'].lower()
+                        if address_key in token_response and 'usd' in token_response[address_key]:
+                            token_prices[symbol] = token_response[address_key]['usd']
+                        else:
+                            # If price not found, use fallback
+                            token_prices[symbol] = 1.0  # Fallback price
+            except Exception as e:
+                print(f"Error fetching token prices: {e}")
     
-    # Calculate current allocation percentages
-    current_allocation = {
-        token: (tokens[token]['balance'] * token_prices[token]) / total_value * 100 if total_value != 0 else 0
-        for token in tokens
-    }
+        # Add fallback prices for any tokens that weren't found
+        for symbol in tokens:
+            if symbol not in token_prices:
+                token_prices[symbol] = 1.0  # Fallback price
     
-    # Generate rebalance actions
-    actions = []
-    for token in tokens:
-        if token in target_allocation:
-            diff = current_allocation[token] - target_allocation[token]
-            if abs(diff) > 1:  # Only suggest changes if difference is significant
-                direction = "sell" if diff > 0 else "buy"
-                amount_usd = abs(diff) * total_value / 100
-                token_price = token_prices[token]
-                token_amount = amount_usd / token_price
-                actions.append({
-                    'token': token,
-                    'action': direction,
-                    'amount': token_amount,
-                    'percentage_change': abs(diff)
-                })
+        # Calculate total portfolio value
+        try:
+            total_value = sum(tokens[token]['balance'] * token_prices[token] for token in tokens)
+            if total_value == 0:
+                return jsonify({'error': 'Total portfolio value is zero'}), 400
+        except Exception as e:
+            print(f"[ERROR] Failed to calculate total value: {str(e)}")
+            # Print the tokens and prices for debugging
+            for token in tokens:
+                print(f"[DEBUG] Token: {token}, Balance: {tokens[token].get('balance')}, Price: {token_prices.get(token)}")
+            return jsonify({'error': f'Error calculating portfolio value: {str(e)}'}), 500
     
-    return jsonify({
-        'total_value': total_value,
-        'current_allocation': current_allocation,
-        'target_allocation': target_allocation,
-        'rebalance_actions': actions,
-        'token_prices': token_prices
-    })
+        # Calculate current allocation percentages
+        current_allocation = {
+            token: (tokens[token]['balance'] * token_prices[token]) / total_value * 100 if total_value != 0 else 0
+            for token in tokens
+        }
+    
+        # Generate rebalance actions
+        actions = []
+        for token in tokens:
+            if token in target_allocation:
+                diff = current_allocation[token] - target_allocation[token]
+                if abs(diff) > 1:  # Only suggest changes if difference is significant
+                    direction = "sell" if diff > 0 else "buy"
+                    amount_usd = abs(diff) * total_value / 100
+                    token_price = token_prices[token]
+                    token_amount = amount_usd / token_price
+                    actions.append({
+                        'token': token,
+                        'action': direction,
+                        'amount': token_amount,
+                        'percentage_change': abs(diff)
+                    })
+    
+        response_data = {
+            'total_value': total_value,
+            'current_allocation': current_allocation,
+            'target_allocation': target_allocation,
+            'rebalance_actions': actions,
+            'token_prices': token_prices
+        }
+        
+        print(f"[DEBUG] Sending response: {response_data}")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"[ERROR] Unhandled exception in calculate_rebalance: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
+@app.route('/api/parse_query', methods=['POST'])
+def parse_query():
+    data = request.json
+    user_query = data.get('query')
+    
+    if not user_query:
+        return jsonify({'error': 'No query provided'}), 400
+    
+    try:
+        # Use OpenAI to parse the query and extract target allocations
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Using gpt-3.5-turbo for better compatibility
+            messages=[
+                {"role": "system", "content": "You are a financial assistant that extracts target portfolio allocations from user queries. Extract token symbols and their target percentage allocations. Return ONLY a valid JSON object with token symbols as keys and percentage values as numbers. Format: {\"TOKEN1\": 25, \"TOKEN2\": 75}. The response must be valid JSON with no additional text, markdown, or formatting."},
+                {"role": "user", "content": user_query}
+            ]
+            # Removed response_format parameter that was causing errors
+        )
+        
+        # Extract the response content and parse it as JSON
+        content = response.choices[0].message.content.strip()
+        
+        # Clean the response in case it contains markdown or other formatting
+        if content.startswith('```json'):
+            content = content.split('```json')[1]
+        if content.endswith('```'):
+            content = content.split('```')[0]
+        content = content.strip()
+        
+        try:
+            target_allocation = json.loads(content)
+        
+            # Validate the response to ensure it contains percentages that sum to approximately 100%
+            total_percentage = sum(target_allocation.values())
+            if not (95 <= total_percentage <= 105):  # Allow for small rounding errors
+                # Normalize to 100%
+                target_allocation = {k: (v / total_percentage * 100) for k, v in target_allocation.items()}
+        except json.JSONDecodeError as json_error:
+            print(f"Error parsing JSON from OpenAI response: {json_error}")
+            print(f"Raw content: {content}")
+            raise Exception(f"Failed to parse JSON from AI response: {content}")
+        
+        return jsonify({
+            'query': user_query,
+            'parsed_allocation': target_allocation
+        })
+    
+    except Exception as e:
+        print(f"Error parsing query with OpenAI: {str(e)}")
+        return jsonify({'error': f'Failed to parse query: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)

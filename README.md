@@ -92,3 +92,5 @@ deactivate
 
 source venv/bin/activate  # On macOS/Linux
 deactivate
+
+source .venv/bin/activate

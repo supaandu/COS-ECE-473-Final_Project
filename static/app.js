@@ -29,6 +29,9 @@ function setupEventListeners() {
     
     // Add token button in modal
     document.getElementById('addTokenBtn').addEventListener('click', addCustomToken);
+    
+    // Parse natural language query button
+    document.getElementById('parse-query').addEventListener('click', parseNaturalLanguageQuery);
 }
 
 async function checkConnection() {
@@ -348,34 +351,141 @@ async function fetchPrices(targetAllocation) {
     return await response.json();
 }
 
-async function calculateRebalance() {
-    if (!wallet) return;
+async function parseNaturalLanguageQuery() {
+    const queryInput = document.getElementById('natural-language-query');
+    const query = queryInput.value.trim();
     
-    try {
-        // Get target allocation
-        const targetAllocation = {};
-        document.querySelectorAll('.allocation-input').forEach(input => {
-            const symbol = input.getAttribute('data-token');
-            targetAllocation[symbol] = parseFloat(input.value || 0);
+    if (!query) {
+        alert('Please enter a query');
+        return;
+    }
+    
+    document.getElementById('query-status').innerHTML = 
+        '<div class="alert alert-info">Processing your query...</div>';
+    
+    // Send request to backend
+    fetch('/api/parse_query', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            document.getElementById('query-status').innerHTML = 
+                `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+        
+        // Fill in the allocation inputs with the parsed values
+        const allocations = data.parsed_allocation;
+        document.getElementById('query-status').innerHTML = 
+            `<div class="alert alert-success">Successfully parsed your request!</div>`;
+        
+        // Clear existing allocations
+        const tokenInputs = document.querySelectorAll('.allocation-input');
+        tokenInputs.forEach(input => {
+            input.value = '';
         });
         
-        // Call our backend API
-        const data = await fetchPrices(targetAllocation);
+        // Set new allocations from the parsed query
+        Object.entries(allocations).forEach(([symbol, percentage]) => {
+            const inputElement = document.querySelector(`.allocation-input[data-token="${symbol}"]`);
+            if (inputElement) {
+                inputElement.value = percentage.toFixed(1);
+            } else {
+                console.warn(`Token ${symbol} from query not found in portfolio`);
+            }
+        });
         
+        // Update total
+        updateAllocationTotal();
+    })
+    .catch(error => {
+        console.error('Error parsing query:', error);
+        document.getElementById('query-status').innerHTML = 
+            `<div class="alert alert-danger">Error parsing your query: ${error.message}</div>`;
+    });
+}
+
+async function calculateRebalance() {
+    if (!wallet || Object.keys(tokens).length === 0) {
+        alert('Please connect your wallet and detect tokens first');
+        return;
+    }
+    
+    // Get allocation percentages
+    const tokenInputs = document.querySelectorAll('.allocation-input');
+    const targetAllocation = {};
+    
+    tokenInputs.forEach(input => {
+        const symbol = input.getAttribute('data-token');
+        const percentage = parseFloat(input.value);
+        
+        if (!isNaN(percentage) && percentage > 0) {
+            targetAllocation[symbol] = percentage;
+        }
+    });
+    
+    // Validate that we have target allocations
+    if (Object.keys(targetAllocation).length === 0) {
+        alert('Please enter at least one target allocation percentage');
+        return;
+    }
+    
+    console.log('Tokens being sent to backend:', tokens);
+    console.log('Target allocation being sent to backend:', targetAllocation);
+    
+    // Display loading indicator
+    document.getElementById('rebalance-results').innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Calculating rebalance strategy...</p>
+        </div>
+    `;
+    document.getElementById('rebalance-card').classList.remove('d-none');
+    
+    // Make sure we have valid token data
+    if (!tokens || Object.keys(tokens).length === 0) {
+        console.error('Token data is missing or empty');
+        document.getElementById('rebalance-results').innerHTML = `
+            <div class="alert alert-danger">Error: Token data is missing or empty. Please refresh the page and try again.</div>
+        `;
+        return;
+    }
+    
+    // Send request to backend
+    try {
+        const response = await fetch('/api/calculate_rebalance', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                tokens,
+                target_allocation: targetAllocation
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Server responded with status: ${response.status}`);
+        }
+        
+        const data = await response.json();
         if (data.error) {
             throw new Error(data.error);
         }
         
-        // Update prices with latest from backend
-        prices = data.token_prices;
-        
-        // Display rebalance results
         displayRebalanceResults(data);
-        
     } catch (error) {
         console.error('Error calculating rebalance:', error);
-        document.getElementById('rebalance-results').innerHTML = 
-            `<div class="alert alert-danger">Error calculating rebalance: ${error.message}</div>`;
+        document.getElementById('rebalance-results').innerHTML = `
+            <div class="alert alert-danger">Error calculating rebalance strategy: ${error.message}</div>
+        `;
     }
 }
 
@@ -407,10 +517,13 @@ function displayRebalanceResults(data) {
     actions.forEach(action => {
         const actionDiv = document.createElement('div');
         actionDiv.className = `rebalance-action ${action.action}`;
+        // Add null checks to prevent errors
+        const amount = action.amount !== undefined ? action.amount.toFixed(6) : '0';
+        const percentage = action.percentage_change !== undefined ? action.percentage_change.toFixed(2) : '0';
         actionDiv.innerHTML = `
             <strong>${action.action.toUpperCase()} ${action.token}:</strong> 
-            ${action.amount.toFixed(6)} ${action.token} 
-            <span class="text-muted">(${action.percentage_change.toFixed(2)}% adjustment)</span>
+            ${amount} ${action.token} 
+            <span class="text-muted">(${percentage}% adjustment)</span>
         `;
         resultsContainer.appendChild(actionDiv);
     });
@@ -420,7 +533,7 @@ function displayRebalanceResults(data) {
     explanationDiv.id = 'rebalance-explanation';
     explanationDiv.className = 'mt-4';
     explanationDiv.innerHTML = `
-        <h5>AI Explanation</h5>
+        <h5>Explanation</h5>
         <p>These rebalancing suggestions will help align your portfolio with your target allocation. The suggestions minimize the number of trades while ensuring your portfolio reaches the desired balance.</p>
         <p>Keep in mind that transaction fees and market conditions may affect the optimal execution of these trades.</p>
     `;
@@ -438,23 +551,27 @@ function displayRebalanceResults(data) {
     // Create simple bar chart
     const chartContainer = document.getElementById('allocation-chart');
     Object.keys(data.current_allocation).forEach(token => {
-        const current = data.current_allocation[token];
-        const target = data.target_allocation[token];
+        const current = data.current_allocation[token] || 0;
+        const target = data.target_allocation[token] || 0;
         
         const row = document.createElement('div');
         row.className = 'mb-3';
+        // Format with null checks
+        const currentFormatted = current !== undefined ? current.toFixed(1) : '0.0';
+        const targetFormatted = target !== undefined ? target.toFixed(1) : '0.0';
+        
         row.innerHTML = `
             <div class="d-flex justify-content-between">
                 <span>${token}</span>
-                <span>Current: ${current.toFixed(1)}% | Target: ${target.toFixed(1)}%</span>
+                <span>Current: ${currentFormatted}% | Target: ${targetFormatted}%</span>
             </div>
             <div class="progress">
                 <div class="progress-bar" role="progressbar" 
-                     style="width: ${target}%; background-color: #28a745;" 
-                     aria-valuenow="${target}" aria-valuemin="0" aria-valuemax="100"></div>
+                     style="width: ${target || 0}%; background-color: #28a745;" 
+                     aria-valuenow="${target || 0}" aria-valuemin="0" aria-valuemax="100"></div>
             </div>
             <div class="current-allocation">
-                <div class="current-marker" style="left: ${current}%;"></div>
+                <div class="current-marker" style="left: ${current || 0}%;"></div>
             </div>
         `;
         chartContainer.appendChild(row);
