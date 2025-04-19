@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@uniswap/sdk-core": "^7.7.2",
+    "@uniswap/smart-order-router": "^4.20.13",
+    "@uniswap/v3-sdk": "^3.25.2",
+    "ethers": "^5.8.0"
+  }
+}
