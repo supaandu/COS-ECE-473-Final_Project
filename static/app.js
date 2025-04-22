@@ -36,7 +36,7 @@ function setupEventListeners() {
   // Calculate rebalance button
   document
     .getElementById("initiate-rebalance")
-    .addEventListener("click", console.log("Initiating rebalance"));
+    .addEventListener("click", executeTransactions);
 
   // Add token button in modal
   document
@@ -658,66 +658,172 @@ function shortenAddress(address) {
   )}`;
 }
 
-// Uniswap wap function
-async function swapTokens({
-  tokenInAddress,
-  tokenOutAddress,
-  amountInUSD,
-  decimalsIn,
-  decimalsOut,
-  priceInUSD,
-  slippageTolerance = 0.005,
-}) {
-  const provider = new ethers.providers.Web3Provider(window.ethereum);
-  const signer = provider.getSigner();
+// -----------------------------------------------------------------------
 
-  const chainId = 11155111; // Sepolia
-
-  const router = new AlphaRouter({ chainId, provider });
-
-  const tokenIn = new Token(chainId, tokenInAddress, decimalsIn);
-  const tokenOut = new Token(chainId, tokenOutAddress, decimalsOut);
-
-  // Convert dollar amount to token amount (using tokenIn price)
-  const amountIn = ethers.utils.parseUnits(
-    (amountInUSD / priceInUSD).toFixed(decimalsIn),
-    decimalsIn
-  );
-
-  const route = await router.route(
-    CurrencyAmount.fromRawAmount(tokenIn, amountIn.toString()),
-    tokenOut,
-    TradeType.EXACT_INPUT,
-    {
-      recipient: await signer.getAddress(),
-      slippageTolerance: new Percent(slippageTolerance * 100, 10_000),
-      deadline: Math.floor(Date.now() / 1000) + 1800, // 30 minutes
-    }
-  );
-
-  if (!route) throw new Error("No route found");
-
-  const transaction = {
-    data: route.methodParameters?.calldata,
-    to: route.methodParameters?.recipient,
-    value: ethers.BigNumber.from(route.methodParameters?.value),
-    from: await signer.getAddress(),
-    gasLimit: ethers.BigNumber.from("500000"), // adjust as needed
-  };
-
-  const tx = await signer.sendTransaction(transaction);
-  console.log("Transaction hash:", tx.hash);
-  await tx.wait();
-  alert("Swap complete!");
+async function sellToken(address, amount) {
+  console.log("Selling token");
+  console.log("Address: " + address);
+  console.log("Amount: " + amount);
 }
 
-const erc20ABI = [
-  "function approve(address spender, uint256 amount) public returns (bool)",
-];
+async function buyToken(address, amount) {
+  console.log("Buying token");
+  console.log("Address: " + address);
+  console.log("Amount: " + amount);
+}
 
-async function approveToken(tokenAddress, spender, amount) {
-  const contract = new ethers.Contract(tokenAddress, erc20ABI, signer);
-  const tx = await contract.approve(spender, amount);
-  await tx.wait();
-  console.log(`Approved ${tokenAddress} for ${spender}`);
+async function executeTransactions() {
+  let tokens = await getTokens();
+  let actions = await getActions();
+
+  actions = actions["rebalance_actions"];
+
+  for (const action of actions) {
+    console.log(action);
+
+    if (action.action === "buy") {
+      buyToken(tokens[action.token].address, action.amount);
+    } else {
+      sellToken(tokens[action.token].address, action.amount);
+    }
+  }
+}
+
+async function getTokens() {
+  if (!wallet) return {};
+
+  document.getElementById("loading-portfolio").classList.remove("d-none");
+  document.getElementById("portfolio-content").classList.add("d-none");
+
+  try {
+    // Get the token list from MetaMask
+    const ethereumProvider = window.ethereum;
+
+    // Request user assets from MetaMask
+    // Note: This is a MetaMask-specific API
+    const assets = await ethereumProvider
+      .request({
+        method: "wallet_getAssets",
+      })
+      .catch(() => []);
+
+    // This fallback is used as wallet_getAssets might not be available in all MetaMask versions
+    const tokenAddresses = [];
+
+    // If we have assets, use them
+    if (assets && assets.length > 0) {
+      for (const asset of assets) {
+        if (asset.type === "ERC20" && asset.address) {
+          tokenAddresses.push(asset.address);
+        }
+      }
+    }
+
+    // Add custom tokens
+    customTokens.forEach((token) => {
+      if (!tokenAddresses.includes(token)) {
+        tokenAddresses.push(token);
+      }
+    });
+
+    // Call our backend API
+    const response = await fetch("/api/detect_tokens", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        wallet_address: wallet,
+        token_addresses: tokenAddresses,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return data.tokens;
+  } catch (error) {
+    console.error("Error detecting tokens:", error);
+    return {};
+  }
+}
+
+async function getActions() {
+  if (!wallet || Object.keys(tokens).length === 0) {
+    alert("Please connect your wallet and detect tokens first");
+    return;
+  }
+
+  // Get allocation percentages
+  const tokenInputs = document.querySelectorAll(".allocation-input");
+  const targetAllocation = {};
+
+  tokenInputs.forEach((input) => {
+    const symbol = input.getAttribute("data-token");
+    const percentage = parseFloat(input.value);
+
+    if (!isNaN(percentage) && percentage > 0) {
+      targetAllocation[symbol] = percentage;
+    }
+  });
+
+  // Validate that we have target allocations
+  if (Object.keys(targetAllocation).length === 0) {
+    alert("Please enter at least one target allocation percentage");
+    return;
+  }
+
+  console.log("Tokens being sent to backend:", tokens);
+  console.log("Target allocation being sent to backend:", targetAllocation);
+
+  // Display loading indicator
+  document.getElementById("rebalance-results").innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Calculating rebalance strategy...</p>
+        </div>
+    `;
+  document.getElementById("rebalance-card").classList.remove("d-none");
+
+  // Make sure we have valid token data
+  if (!tokens || Object.keys(tokens).length === 0) {
+    console.error("Token data is missing or empty");
+    document.getElementById("rebalance-results").innerHTML = `
+            <div class="alert alert-danger">Error: Token data is missing or empty. Please refresh the page and try again.</div>
+        `;
+    return;
+  }
+
+  // Send request to backend
+  try {
+    const response = await fetch("/api/calculate_rebalance", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tokens,
+        target_allocation: targetAllocation,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server responded with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Error calculating rebalance:", error);
+    return [];
+  }
 }
