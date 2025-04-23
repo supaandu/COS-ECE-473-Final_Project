@@ -661,15 +661,80 @@ function shortenAddress(address) {
 // -----------------------------------------------------------------------
 
 async function sellToken(address, amount) {
-  console.log("Selling token");
-  console.log("Address: " + address);
-  console.log("Amount: " + amount);
+  // Get Web3 instance and the user's account address
+  const web3 = new Web3(window.ethereum);
+  const accounts = await web3.eth.requestAccounts();
+  const userAddress = accounts[0]; // Your wallet address (connected MetaMask)
+
+  // Token contract ABI (ERC-20 standard)
+  const tokenAbi = [
+    {
+      name: "transfer",
+      type: "function",
+      inputs: [
+        { name: "_to", type: "address" },
+        { name: "_value", type: "uint256" },
+      ],
+      outputs: [{ name: "", type: "bool" }],
+    },
+  ];
+
+  // Create a contract instance
+  const tokenContract = new web3.eth.Contract(tokenAbi, address);
+
+  // Token contract address (can be the address of the contract you're interacting with)
+  const contractAddress = tokenAddress; // The contract is both the "buyer" and the "recipient"
+
+  // Convert the amount into the smallest token unit (e.g., wei for ERC20 tokens)
+  const rawAmount = web3.utils.toWei(amount.toString(), "ether");
+
+  try {
+    // Call the `transfer` function to send tokens from your wallet to the token contract
+    const receipt = await tokenContract.methods
+      .transfer(contractAddress, rawAmount) // Send tokens to the contract address
+      .send({ from: userAddress });
+
+    console.log("Tokens sold successfully! Tx hash:", receipt.transactionHash);
+  } catch (error) {
+    console.error("Token sale failed:", error);
+  }
 }
 
 async function buyToken(address, amount) {
-  console.log("Buying token");
-  console.log("Address: " + address);
-  console.log("Amount: " + amount);
+  // Get Web3 instance and the user's account address
+  const web3 = new Web3(window.ethereum);
+  const accounts = await web3.eth.requestAccounts();
+  const userAddress = accounts[0]; // Your wallet address (connected MetaMask)
+
+  // Token contract ABI (ERC-20 standard)
+  const tokenAbi = [
+    {
+      name: "transfer",
+      type: "function",
+      inputs: [
+        { name: "_to", type: "address" },
+        { name: "_value", type: "uint256" },
+      ],
+      outputs: [{ name: "", type: "bool" }],
+    },
+  ];
+
+  // Create a contract instance
+  const tokenContract = new web3.eth.Contract(tokenAbi, address);
+
+  // Convert the amount into the smallest token unit (e.g., wei for ERC20 tokens)
+  const rawAmount = web3.utils.toWei(amount.toString(), "ether");
+
+  try {
+    // Call the `transfer` function to send tokens to your wallet
+    const receipt = await tokenContract.methods
+      .transfer(userAddress, rawAmount) // Send tokens to the connected wallet
+      .send({ from: userAddress });
+
+    console.log("Transfer successful! Tx hash:", receipt.transactionHash);
+  } catch (error) {
+    console.error("Token transfer failed:", error);
+  }
 }
 
 async function executeTransactions() {
