@@ -11,7 +11,7 @@ This web application allows users to:
 4. Calculate rebalancing actions to reach those target allocations
 5. Execute transactions to rebalance their portfolio
 
-## Setup Instructions
+## Instructions
 
 ### Prerequisites
 
@@ -29,7 +29,7 @@ cd COS-ECE-473-Final_Project
 
 2. **Create and activate virtual environment**
 
-On macOS/Linux:
+On MacOS/Linux:
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -59,7 +59,7 @@ OPENAI_API_KEY=your_openai_api_key
 You'll need to:
 - Get an API key from [Etherscan](https://etherscan.io/apis)
 - Create an account on [Infura](https://infura.io/) and get an Ethereum endpoint URL
-- Get an API key from [OpenAI](https://openai.com/)
+- Get an API key from [OpenAI](https://openai.com/api/)
 
 ### Running the Application
 
@@ -83,7 +83,7 @@ python app.py
 
 3. **Open in browser**
 
-Open http://localhost:5001 in your web browser
+Open http://127.0.0.1:5001 in your web browser
 
 ### Deactivating the Virtual Environment
 
