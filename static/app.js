@@ -683,10 +683,11 @@ async function sellToken(address, amount) {
   const tokenContract = new web3.eth.Contract(tokenAbi, address);
 
   // Token contract address (can be the address of the contract you're interacting with)
-  const contractAddress = tokenAddress; // The contract is both the "buyer" and the "recipient"
+  const contractAddress = address; // The contract is both the "buyer" and the "recipient"
 
   // Convert the amount into the smallest token unit (e.g., wei for ERC20 tokens)
-  const rawAmount = web3.utils.toWei(amount.toString(), "ether");
+  const fixedAmount = parseFloat(amount).toFixed(18); // trim number to 18 decimal places (maximum)
+  const rawAmount = web3.utils.toWei(fixedAmount.toString(), "ether");
 
   try {
     // Call the `transfer` function to send tokens from your wallet to the token contract
@@ -723,7 +724,8 @@ async function buyToken(address, amount) {
   const tokenContract = new web3.eth.Contract(tokenAbi, address);
 
   // Convert the amount into the smallest token unit (e.g., wei for ERC20 tokens)
-  const rawAmount = web3.utils.toWei(amount.toString(), "ether");
+  const fixedAmount = parseFloat(amount).toFixed(18); // trim number to 18 decimal places (maximum)
+  const rawAmount = web3.utils.toWei(fixedAmount.toString(), "ether");
 
   try {
     // Call the `transfer` function to send tokens to your wallet
