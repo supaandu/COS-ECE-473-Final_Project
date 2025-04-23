@@ -1,14 +1,15 @@
-# Portfolio Rebalancing Tool
+# CoinTune: An AI-Powered Cryptocurrency Portfolio Rebalancer
 
-Princeton COS/ECE 473 Final Project
+ECE 473 Final Project
 
 ## Overview
 
 This web application allows users to:
-1. Connect their Ethereum wallet
+1. Connect their Metamask wallet
 2. View their current token holdings
 3. Set target allocations for their portfolio
 4. Calculate rebalancing actions to reach those target allocations
+5. Execute transactions to rebalance their portfolio
 
 ## Setup Instructions
 
@@ -52,17 +53,19 @@ Create a `.env` file in the root directory with the following content:
 ```
 ETHERSCAN_API_KEY=your_etherscan_api_key
 INFURA_URL=your_infura_url
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 You'll need to:
 - Get an API key from [Etherscan](https://etherscan.io/apis)
 - Create an account on [Infura](https://infura.io/) and get an Ethereum endpoint URL
+- Get an API key from [OpenAI](https://openai.com/)
 
 ### Running the Application
 
 1. **Activate the virtual environment** (if not already activated)
 
-On macOS/Linux:
+On MacOS/Linux:
 ```bash
 source venv/bin/activate
 ```
@@ -88,9 +91,4 @@ When you're done working on the project, you can deactivate the virtual environm
 
 ```bash
 deactivate
-``` 
-
-source venv/bin/activate  # On macOS/Linux
-deactivate
-
-source .venv/bin/activate
+```
