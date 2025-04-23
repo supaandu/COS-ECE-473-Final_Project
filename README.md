@@ -1,7 +1,5 @@
 # CoinTune: An AI-Powered Cryptocurrency Portfolio Rebalancer
 
-ECE 473 Final Project
-
 ## Overview
 
 This web application allows users to:
