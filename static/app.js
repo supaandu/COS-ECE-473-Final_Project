@@ -360,10 +360,13 @@ function updateAllocationTotal() {
 
   // Enable/disable calculate button based on total
   const calculateButton = document.getElementById("calculate-rebalance");
+  const initiateButton = document.getElementById("initiate-rebalance");
   if (Math.abs(total - 100) < 0.1) {
     calculateButton.disabled = false;
+    initiateButton.disabled = false;
   } else {
     calculateButton.disabled = true;
+    initiateButton.disabled = true;
   }
 }
 
@@ -660,82 +663,118 @@ function shortenAddress(address) {
 
 // -----------------------------------------------------------------------
 
-async function sellToken(address, amount) {
-  // Get Web3 instance and the user's account address
+const UNISWAP_ROUTER_ADDRESS = "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3"; // Sepolia router
+const WETH_ADDRESS = "0x5f207d42f869fd1c71d7f0f81a2a67fc20ff7323"; // WETH Sepolia (or your deployed version)
+
+const ERC20_ABI = [
+  {
+    name: "approve",
+    type: "function",
+    inputs: [
+      { name: "_spender", type: "address" },
+      { name: "_value", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "transfer",
+    type: "function",
+    inputs: [
+      { name: "_to", type: "address" },
+      { name: "_value", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+];
+
+const UNISWAP_ROUTER_ABI = [
+  {
+    inputs: [
+      { internalType: "uint256", name: "amountOutMin", type: "uint256" },
+      { internalType: "address[]", name: "path", type: "address[]" },
+      { internalType: "address", name: "to", type: "address" },
+      { internalType: "uint256", name: "deadline", type: "uint256" },
+    ],
+    name: "swapExactETHForTokens",
+    outputs: [
+      { internalType: "uint256[]", name: "amounts", type: "uint256[]" },
+    ],
+    stateMutability: "payable",
+    type: "function",
+  },
+  {
+    name: "swapExactTokensForETH",
+    type: "function",
+    inputs: [
+      { name: "amountIn", type: "uint256" },
+      { name: "amountOutMin", type: "uint256" },
+      { name: "path", type: "address[]" },
+      { name: "to", type: "address" },
+      { name: "deadline", type: "uint256" },
+    ],
+    outputs: [{ name: "amounts", type: "uint256[]" }],
+    stateMutability: "nonpayable",
+  },
+];
+
+async function sellTokenForETH(tokenAddress, amount) {
   const web3 = new Web3(window.ethereum);
   const accounts = await web3.eth.requestAccounts();
-  const userAddress = accounts[0]; // Your wallet address (connected MetaMask)
+  const userAddress = accounts[0];
 
-  // Token contract ABI (ERC-20 standard)
-  const tokenAbi = [
-    {
-      name: "transfer",
-      type: "function",
-      inputs: [
-        { name: "_to", type: "address" },
-        { name: "_value", type: "uint256" },
-      ],
-      outputs: [{ name: "", type: "bool" }],
-    },
-  ];
+  const tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
+  const uniswapRouter = new web3.eth.Contract(
+    UNISWAP_ROUTER_ABI,
+    UNISWAP_ROUTER_ADDRESS
+  );
 
-  // Create a contract instance
-  const tokenContract = new web3.eth.Contract(tokenAbi, address);
+  const rawAmount = web3.utils.toWei(amount.toString(), "ether");
 
-  // Token contract address (can be the address of the contract you're interacting with)
-  const contractAddress = address; // The contract is both the "buyer" and the "recipient"
+  // Approve Uniswap router to spend your tokens
+  await tokenContract.methods
+    .approve(UNISWAP_ROUTER_ADDRESS, rawAmount)
+    .send({ from: userAddress });
 
-  // Convert the amount into the smallest token unit (e.g., wei for ERC20 tokens)
-  const fixedAmount = parseFloat(amount).toFixed(18); // trim number to 18 decimal places (maximum)
-  const rawAmount = web3.utils.toWei(fixedAmount.toString(), "ether");
+  console.log("Approved token for Uniswap.");
 
-  try {
-    // Call the `transfer` function to send tokens from your wallet to the token contract
-    const receipt = await tokenContract.methods
-      .transfer(contractAddress, rawAmount) // Send tokens to the contract address
-      .send({ from: userAddress });
+  // Perform the swap (token -> ETH)
+  const minETHOut = 0; // Accept any amount of ETH (for testing purposes)
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
+  const path = [tokenAddress, WETH_ADDRESS];
 
-    console.log("Tokens sold successfully! Tx hash:", receipt.transactionHash);
-  } catch (error) {
-    console.error("Token sale failed:", error);
-  }
+  const tx = await uniswapRouter.methods
+    .swapExactTokensForETH(rawAmount, minETHOut, path, userAddress, deadline)
+    .send({ from: userAddress });
+
+  console.log("Token sold successfully! Tx hash:", tx.transactionHash);
 }
 
-async function buyToken(address, amount) {
-  // Get Web3 instance and the user's account address
+async function buyTokenWithETH(tokenAddress, ethAmount) {
   const web3 = new Web3(window.ethereum);
   const accounts = await web3.eth.requestAccounts();
-  const userAddress = accounts[0]; // Your wallet address (connected MetaMask)
+  const userAddress = accounts[0];
 
-  // Token contract ABI (ERC-20 standard)
-  const tokenAbi = [
-    {
-      name: "transfer",
-      type: "function",
-      inputs: [
-        { name: "_to", type: "address" },
-        { name: "_value", type: "uint256" },
-      ],
-      outputs: [{ name: "", type: "bool" }],
-    },
-  ];
+  const router = new web3.eth.Contract(
+    UNISWAP_ROUTER_ABI,
+    UNISWAP_ROUTER_ADDRESS
+  );
 
-  // Create a contract instance
-  const tokenContract = new web3.eth.Contract(tokenAbi, address);
-
-  // Convert the amount into the smallest token unit (e.g., wei for ERC20 tokens)
-  const fixedAmount = parseFloat(amount).toFixed(18); // trim number to 18 decimal places (maximum)
-  const rawAmount = web3.utils.toWei(fixedAmount.toString(), "ether");
+  const path = [WETH_ADDRESS, tokenAddress]; // ETH -> Token
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
+  const minTokensOut = 0; // accept any amount for now (not for production)
+  const rawETH = web3.utils.toWei(ethAmount.toString(), "ether");
 
   try {
-    // Call the `transfer` function to send tokens to your wallet
-    const receipt = await tokenContract.methods
-      .transfer(userAddress, rawAmount) // Send tokens to the connected wallet
-      .send({ from: userAddress });
+    const tx = await router.methods
+      .swapExactETHForTokens(minTokensOut, path, userAddress, deadline)
+      .send({
+        from: userAddress,
+        value: rawETH,
+      });
 
-    console.log("Transfer successful! Tx hash:", receipt.transactionHash);
+    console.log("Token bought! Tx hash:", tx.transactionHash);
   } catch (error) {
-    console.error("Token transfer failed:", error);
+    console.error("Buy failed:", error);
   }
 }
 
@@ -746,14 +785,14 @@ async function executeTransactions() {
   actions = actions["rebalance_actions"];
 
   for (const action of actions) {
-    console.log(action);
-
     if (action.action === "buy") {
-      buyToken(tokens[action.token].address, action.amount);
+      buyTokenWithETH(tokens[action.token].address, action.amount);
     } else {
-      sellToken(tokens[action.token].address, action.amount);
+      sellTokenForETH(tokens[action.token].address, action.amount);
     }
   }
+
+  displayTokens();
 }
 
 async function getTokens() {
@@ -845,17 +884,6 @@ async function getActions() {
 
   console.log("Tokens being sent to backend:", tokens);
   console.log("Target allocation being sent to backend:", targetAllocation);
-
-  // Display loading indicator
-  document.getElementById("rebalance-results").innerHTML = `
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p>Calculating rebalance strategy...</p>
-        </div>
-    `;
-  document.getElementById("rebalance-card").classList.remove("d-none");
 
   // Make sure we have valid token data
   if (!tokens || Object.keys(tokens).length === 0) {
