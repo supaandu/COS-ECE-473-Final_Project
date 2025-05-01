@@ -220,7 +220,6 @@ async function detectTokens() {
   }
 }
 
-
 function displayTokens() {
   const tokensTable = document.getElementById("tokens-table");
   tokensTable.innerHTML = "";
@@ -333,7 +332,9 @@ function updateTokenDisplay(currentAllocation, totalValue) {
     inputGroup.innerHTML = `
             <span class="input-group-text">${symbol}</span>
             <input type="number" class="form-control allocation-input" id="allocation-${symbol}" 
-                   min="0" max="100" step="0.001" value="${percentage.toFixed(3)}" 
+                   min="0" max="100" step="0.001" value="${percentage.toFixed(
+                     3
+                   )}" 
                    data-token="${symbol}">
             <span class="input-group-text">%</span>
         `;
@@ -688,12 +689,10 @@ function shortenAddress(address) {
 }
 
 // -----------------------------------------------------------------------
+// Transactions:
 
-// const UNISWAP_ROUTER_ADDRESS = "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3"; // Sepolia router
-// const UNISWAP_ROUTER_ADDRESS = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
-const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008"
-// const WETH_ADDRESS = "0x5f207d42f869fd1c71d7f0f81a2a67fc20ff7323"; // WETH Sepolia (or your deployed version)
-const WETH_ADDRESS = "0x5f207d42F869fd1c71d7f0f81a2A67Fc20FF7323"
+const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008";
+const WETH_ADDRESS = "0x5f207d42F869fd1c71d7f0f81a2A67Fc20FF7323";
 
 const ERC20_ABI = [
   {
@@ -713,6 +712,16 @@ const ERC20_ABI = [
       { name: "_value", type: "uint256" },
     ],
     outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    constant: true,
+    inputs: [
+      { name: "_owner", type: "address" },
+      { name: "_spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    type: "function",
   },
 ];
 
@@ -751,8 +760,14 @@ async function sellTokenForETH(tokenAddress, amount) {
   const accounts = await web3.eth.requestAccounts();
   const userAddress = accounts[0];
 
+  console.log("Token Address");
+  console.log(tokenAddress);
+
   // Sanity check
-  if (!tokenAddress || tokenAddress === "0x0000000000000000000000000000000000000000") {
+  if (
+    !tokenAddress ||
+    tokenAddress === "0x0000000000000000000000000000000000000000"
+  ) {
     console.error("Invalid token address.");
     return;
   }
@@ -769,7 +784,7 @@ async function sellTokenForETH(tokenAddress, amount) {
     UNISWAP_ROUTER_ADDRESS
   );
 
-  // Convert amount to raw units based on decimals (assumes 18, adjust if needed)
+  // // Convert amount to raw units based on decimals (assumes 18, adjust if needed)
   const rawAmount = web3.utils.toWei(amount.toString(), "ether");
 
   try {
@@ -794,43 +809,11 @@ async function sellTokenForETH(tokenAddress, amount) {
       .swapExactTokensForETH(rawAmount, minETHOut, path, userAddress, deadline)
       .send({ from: userAddress });
 
-    console.log("✅ Token sold successfully. Tx hash:", tx.transactionHash);
+    console.log("Token sold successfully. Tx hash:", tx.transactionHash);
   } catch (err) {
-    console.error("❌ Failed to sell token:", err.message || err);
+    console.error("Failed to sell token:", err.message || err);
   }
 }
-
-// async function sellTokenForETH(tokenAddress, amount) {
-//   const web3 = new Web3(window.ethereum);
-//   const accounts = await web3.eth.requestAccounts();
-//   const userAddress = accounts[0];
-
-//   const tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
-//   const uniswapRouter = new web3.eth.Contract(
-//     UNISWAP_ROUTER_ABI,
-//     UNISWAP_ROUTER_ADDRESS
-//   );
-
-//   const rawAmount = web3.utils.toWei(amount.toString(), "ether");
-
-//   // Approve Uniswap router to spend your tokens
-//   await tokenContract.methods
-//     .approve(UNISWAP_ROUTER_ADDRESS, rawAmount)
-//     .send({ from: userAddress });
-
-//   console.log("Approved token for Uniswap.");
-
-//   // Perform the swap (token -> ETH)
-//   const minETHOut = 0; // Accept any amount of ETH (for testing purposes)
-//   const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
-//   const path = [tokenAddress, WETH_ADDRESS];
-
-//   const tx = await uniswapRouter.methods
-//     .swapExactTokensForETH(rawAmount, minETHOut, path, userAddress, deadline)
-//     .send({ from: userAddress });
-
-//   console.log("Token sold successfully! Tx hash:", tx.transactionHash);
-// }
 
 async function buyTokenWithETH(tokenAddress, ethAmount) {
   const web3 = new Web3(window.ethereum);
@@ -870,7 +853,7 @@ async function executeTransactions() {
   for (const action of actions) {
     const amount = parseFloat(action.amount);
     if (isNaN(amount) || amount <= 0.0001) continue; // Skip tiny or invalid amounts
-  
+
     try {
       if (action.action === "buy") {
         await buyTokenWithETH(tokens[action.token].address, amount);
@@ -881,9 +864,8 @@ async function executeTransactions() {
       console.error(`Failed to ${action.action} ${action.token}:`, err);
     }
   }
-  
 
-  displayTokens();
+  detectTokens();
 }
 
 async function getTokens() {
