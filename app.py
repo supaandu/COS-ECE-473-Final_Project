@@ -297,11 +297,12 @@ def calculate_rebalance():
         for token in tokens:
             if token in target_allocation:
                 diff = current_allocation[token] - target_allocation[token]
-                if abs(diff) > 1:  # Only suggest changes if difference is significant
+                if abs(diff) > 0.0000001:  # Only suggest changes if difference is significant
                     direction = "sell" if diff > 0 else "buy"
                     amount_usd = abs(diff) * total_value / 100
                     token_price = token_prices[token]
                     token_amount = amount_usd / token_price
+                    print(f"[DEBUG] {token} diff: {diff}, amount_usd: {amount_usd}, token_amount: {token_amount}")
                     actions.append({
                         'token': token,
                         'action': direction,

@@ -220,6 +220,7 @@ async function detectTokens() {
   }
 }
 
+
 function displayTokens() {
   const tokensTable = document.getElementById("tokens-table");
   tokensTable.innerHTML = "";
@@ -228,46 +229,73 @@ function displayTokens() {
   const allocationForm = document.getElementById("allocation-form");
   allocationForm.innerHTML = "";
 
-  // First, calculate total value and display tokens
-  // We'll get real prices when we calculate rebalance
+  // Estimate total portfolio value and placeholder prices
+  const tempPrices = {};
   let totalValue = 0;
 
-  // Make a placeholder call to calculate_rebalance to get prices
-  const target_allocation = {};
   Object.keys(tokens).forEach((symbol) => {
-    // Set default target to current distribution
-    target_allocation[symbol] = 100 / Object.keys(tokens).length;
+    tempPrices[symbol] = symbol === "ETH" ? 1500 : 1.0;
+    totalValue += tokens[symbol].balance * tempPrices[symbol];
   });
 
-  fetchPrices(target_allocation)
-    .then((priceData) => {
-      prices = priceData.token_prices;
-      updateTokenDisplay(priceData.current_allocation, priceData.total_value);
-    })
-    .catch((error) => {
-      console.error("Error fetching prices:", error);
-      // Fallback to placeholder prices if API call fails
-      const tempPrices = {};
-      Object.keys(tokens).forEach((symbol) => {
-        tempPrices[symbol] = symbol === "ETH" ? 1500 : 1.0;
-      });
-      prices = tempPrices;
+  prices = tempPrices;
 
-      // Calculate total value with placeholder prices
-      totalValue = Object.keys(tokens).reduce((sum, symbol) => {
-        return sum + tokens[symbol].balance * prices[symbol];
-      }, 0);
+  const currentAllocation = {};
+  Object.keys(tokens).forEach((symbol) => {
+    const value = tokens[symbol].balance * prices[symbol];
+    currentAllocation[symbol] = (value / totalValue) * 100;
+  });
 
-      // Calculate current allocation percentages with placeholders
-      const currentAllocation = {};
-      Object.keys(tokens).forEach((symbol) => {
-        const value = tokens[symbol].balance * prices[symbol];
-        currentAllocation[symbol] = (value / totalValue) * 100;
-      });
-
-      updateTokenDisplay(currentAllocation, totalValue);
-    });
+  updateTokenDisplay(currentAllocation, totalValue);
 }
+// function displayTokens() {
+//   const tokensTable = document.getElementById("tokens-table");
+//   tokensTable.innerHTML = "";
+
+//   // Clear allocation form
+//   const allocationForm = document.getElementById("allocation-form");
+//   allocationForm.innerHTML = "";
+
+//   // First, calculate total value and display tokens
+//   // We'll get real prices when we calculate rebalance
+//   let totalValue = 0;
+
+//   // Make a placeholder call to calculate_rebalance to get prices
+//   const target_allocation = {};
+//   Object.keys(tokens).forEach((symbol) => {
+//     // Set default target to current distribution
+//     target_allocation[symbol] = 100 / Object.keys(tokens).length;
+//   });
+
+//   fetchPrices(target_allocation)
+//     .then((priceData) => {
+//       prices = priceData.token_prices;
+//       updateTokenDisplay(priceData.current_allocation, priceData.total_value);
+//     })
+//     .catch((error) => {
+//       console.error("Error fetching prices:", error);
+//       // Fallback to placeholder prices if API call fails
+//       const tempPrices = {};
+//       Object.keys(tokens).forEach((symbol) => {
+//         tempPrices[symbol] = symbol === "ETH" ? 1500 : 1.0;
+//       });
+//       prices = tempPrices;
+
+//       // Calculate total value with placeholder prices
+//       totalValue = Object.keys(tokens).reduce((sum, symbol) => {
+//         return sum + tokens[symbol].balance * prices[symbol];
+//       }, 0);
+
+//       // Calculate current allocation percentages with placeholders
+//       const currentAllocation = {};
+//       Object.keys(tokens).forEach((symbol) => {
+//         const value = tokens[symbol].balance * prices[symbol];
+//         currentAllocation[symbol] = (value / totalValue) * 100;
+//       });
+
+//       updateTokenDisplay(currentAllocation, totalValue);
+//     });
+// }
 
 function updateTokenDisplay(currentAllocation, totalValue) {
   const tokensTable = document.getElementById("tokens-table");
@@ -305,9 +333,7 @@ function updateTokenDisplay(currentAllocation, totalValue) {
     inputGroup.innerHTML = `
             <span class="input-group-text">${symbol}</span>
             <input type="number" class="form-control allocation-input" id="allocation-${symbol}" 
-                   min="0" max="100" step="0.1" value="${Math.round(
-                     percentage
-                   )}" 
+                   min="0" max="100" step="0.001" value="${percentage.toFixed(3)}" 
                    data-token="${symbol}">
             <span class="input-group-text">%</span>
         `;
@@ -361,7 +387,7 @@ function updateAllocationTotal() {
   // Enable/disable calculate button based on total
   const calculateButton = document.getElementById("calculate-rebalance");
   const initiateButton = document.getElementById("initiate-rebalance");
-  if (Math.abs(total - 100) < 0.1) {
+  if (Math.abs(total - 100) < 0.01) {
     calculateButton.disabled = false;
     initiateButton.disabled = false;
   } else {
@@ -433,7 +459,7 @@ async function parseNaturalLanguageQuery() {
           `.allocation-input[data-token="${symbol}"]`
         );
         if (inputElement) {
-          inputElement.value = percentage.toFixed(1);
+          inputElement.value = percentage.toFixed(3);
         } else {
           console.warn(`Token ${symbol} from query not found in portfolio`);
         }
@@ -464,7 +490,7 @@ async function calculateRebalance() {
     const symbol = input.getAttribute("data-token");
     const percentage = parseFloat(input.value);
 
-    if (!isNaN(percentage) && percentage > 0) {
+    if (!isNaN(percentage) && percentage >= 0) {
       targetAllocation[symbol] = percentage;
     }
   });
@@ -663,8 +689,11 @@ function shortenAddress(address) {
 
 // -----------------------------------------------------------------------
 
-const UNISWAP_ROUTER_ADDRESS = "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3"; // Sepolia router
-const WETH_ADDRESS = "0x5f207d42f869fd1c71d7f0f81a2a67fc20ff7323"; // WETH Sepolia (or your deployed version)
+// const UNISWAP_ROUTER_ADDRESS = "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3"; // Sepolia router
+// const UNISWAP_ROUTER_ADDRESS = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+const UNISWAP_ROUTER_ADDRESS = "0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008"
+// const WETH_ADDRESS = "0x5f207d42f869fd1c71d7f0f81a2a67fc20ff7323"; // WETH Sepolia (or your deployed version)
+const WETH_ADDRESS = "0x5f207d42F869fd1c71d7f0f81a2A67Fc20FF7323"
 
 const ERC20_ABI = [
   {
@@ -722,32 +751,86 @@ async function sellTokenForETH(tokenAddress, amount) {
   const accounts = await web3.eth.requestAccounts();
   const userAddress = accounts[0];
 
+  // Sanity check
+  if (!tokenAddress || tokenAddress === "0x0000000000000000000000000000000000000000") {
+    console.error("Invalid token address.");
+    return;
+  }
+
+  if (!amount || amount <= 0) {
+    console.error("Invalid amount.");
+    return;
+  }
+
+  // Create contract instances
   const tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
   const uniswapRouter = new web3.eth.Contract(
     UNISWAP_ROUTER_ABI,
     UNISWAP_ROUTER_ADDRESS
   );
 
+  // Convert amount to raw units based on decimals (assumes 18, adjust if needed)
   const rawAmount = web3.utils.toWei(amount.toString(), "ether");
 
-  // Approve Uniswap router to spend your tokens
-  await tokenContract.methods
-    .approve(UNISWAP_ROUTER_ADDRESS, rawAmount)
-    .send({ from: userAddress });
+  try {
+    // Step 1: Approve Uniswap to spend the token
+    const allowance = await tokenContract.methods
+      .allowance(userAddress, UNISWAP_ROUTER_ADDRESS)
+      .call();
 
-  console.log("Approved token for Uniswap.");
+    if (web3.utils.toBN(allowance).lt(web3.utils.toBN(rawAmount))) {
+      console.log("Approving Uniswap router to spend tokens...");
+      await tokenContract.methods
+        .approve(UNISWAP_ROUTER_ADDRESS, rawAmount)
+        .send({ from: userAddress });
+    }
 
-  // Perform the swap (token -> ETH)
-  const minETHOut = 0; // Accept any amount of ETH (for testing purposes)
-  const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
-  const path = [tokenAddress, WETH_ADDRESS];
+    // Step 2: Swap tokens for ETH
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
+    const path = [tokenAddress, WETH_ADDRESS];
+    const minETHOut = 0; // WARNING: Accepting any ETH, not safe for production
 
-  const tx = await uniswapRouter.methods
-    .swapExactTokensForETH(rawAmount, minETHOut, path, userAddress, deadline)
-    .send({ from: userAddress });
+    const tx = await uniswapRouter.methods
+      .swapExactTokensForETH(rawAmount, minETHOut, path, userAddress, deadline)
+      .send({ from: userAddress });
 
-  console.log("Token sold successfully! Tx hash:", tx.transactionHash);
+    console.log("✅ Token sold successfully. Tx hash:", tx.transactionHash);
+  } catch (err) {
+    console.error("❌ Failed to sell token:", err.message || err);
+  }
 }
+
+// async function sellTokenForETH(tokenAddress, amount) {
+//   const web3 = new Web3(window.ethereum);
+//   const accounts = await web3.eth.requestAccounts();
+//   const userAddress = accounts[0];
+
+//   const tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
+//   const uniswapRouter = new web3.eth.Contract(
+//     UNISWAP_ROUTER_ABI,
+//     UNISWAP_ROUTER_ADDRESS
+//   );
+
+//   const rawAmount = web3.utils.toWei(amount.toString(), "ether");
+
+//   // Approve Uniswap router to spend your tokens
+//   await tokenContract.methods
+//     .approve(UNISWAP_ROUTER_ADDRESS, rawAmount)
+//     .send({ from: userAddress });
+
+//   console.log("Approved token for Uniswap.");
+
+//   // Perform the swap (token -> ETH)
+//   const minETHOut = 0; // Accept any amount of ETH (for testing purposes)
+//   const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes from now
+//   const path = [tokenAddress, WETH_ADDRESS];
+
+//   const tx = await uniswapRouter.methods
+//     .swapExactTokensForETH(rawAmount, minETHOut, path, userAddress, deadline)
+//     .send({ from: userAddress });
+
+//   console.log("Token sold successfully! Tx hash:", tx.transactionHash);
+// }
 
 async function buyTokenWithETH(tokenAddress, ethAmount) {
   const web3 = new Web3(window.ethereum);
@@ -780,17 +863,25 @@ async function buyTokenWithETH(tokenAddress, ethAmount) {
 
 async function executeTransactions() {
   let tokens = await getTokens();
-  let actions = await getActions();
+  let actions = await getActions(tokens);
 
   actions = actions["rebalance_actions"];
 
   for (const action of actions) {
-    if (action.action === "buy") {
-      buyTokenWithETH(tokens[action.token].address, action.amount);
-    } else {
-      sellTokenForETH(tokens[action.token].address, action.amount);
+    const amount = parseFloat(action.amount);
+    if (isNaN(amount) || amount <= 0.0001) continue; // Skip tiny or invalid amounts
+  
+    try {
+      if (action.action === "buy") {
+        await buyTokenWithETH(tokens[action.token].address, amount);
+      } else if (action.action === "sell") {
+        await sellTokenForETH(tokens[action.token].address, amount);
+      }
+    } catch (err) {
+      console.error(`Failed to ${action.action} ${action.token}:`, err);
     }
   }
+  
 
   displayTokens();
 }
@@ -857,7 +948,7 @@ async function getTokens() {
   }
 }
 
-async function getActions() {
+async function getActions(currentTokens) {
   if (!wallet || Object.keys(tokens).length === 0) {
     alert("Please connect your wallet and detect tokens first");
     return;
@@ -871,7 +962,7 @@ async function getActions() {
     const symbol = input.getAttribute("data-token");
     const percentage = parseFloat(input.value);
 
-    if (!isNaN(percentage) && percentage > 0) {
+    if (!isNaN(percentage) && percentage >= 0) {
       targetAllocation[symbol] = percentage;
     }
   });
