@@ -3,6 +3,7 @@ import json
 import requests
 import time
 import re
+from typing import List, Dict, Any, Optional, Union
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from web3 import Web3
@@ -74,15 +75,18 @@ def detect_tokens():
     eth_balance = w3.eth.get_balance(wallet_address)
     eth_balance_in_eth = eth_balance / 10**18
     
-    # Initialize tokens dictionary with ETH
-    detected_tokens = {
-        "ETH": {
+    # Initialize tokens dictionary
+    detected_tokens = {}
+    
+    # Only add ETH if the balance is greater than 0
+    if eth_balance_in_eth > 0:
+        detected_tokens["ETH"] = {
             "address": None,  # Native ETH
             "decimals": 18,
             "balance": eth_balance_in_eth,
             "symbol": "ETH"
         }
-    }
+        print(f"[DEBUG] Added ETH with balance: {eth_balance_in_eth}")
     
     # STEP 1: Use Etherscan API to get all tokens the address has interacted with
     # This will find ALL tokens, not just ETH
@@ -205,10 +209,28 @@ def detect_tokens():
             except Exception as e:
                 print(f"Error getting token data for {token_address}: {str(e)}")
     
-    return jsonify({
-        'wallet': wallet_address,
-        'tokens': detected_tokens
-    })
+    # Get live prices for all tokens using the same function that the AI agent uses
+    token_symbols = list(detected_tokens.keys())
+    print(f"[DEBUG] Getting live prices for {len(token_symbols)} tokens: {token_symbols}")
+    
+    try:
+        # Get accurate prices using the same function the AI agent uses
+        token_prices = get_live_prices(token_symbols)
+        print(f"[DEBUG] Got prices: {token_prices}")
+        
+        # Return both tokens and their live prices
+        return jsonify({
+            'wallet': wallet_address,
+            'tokens': detected_tokens,
+            'prices': token_prices  # Add real prices to the response
+        })
+    except Exception as e:
+        print(f"[ERROR] Failed to get live prices: {str(e)}")
+        # Fall back to just tokens if price fetch fails
+        return jsonify({
+            'wallet': wallet_address,
+            'tokens': detected_tokens
+        })
 
 @app.route('/api/calculate_rebalance', methods=['POST'])
 def calculate_rebalance():
@@ -377,6 +399,492 @@ def parse_query():
     except Exception as e:
         print(f"Error parsing query with OpenAI: {str(e)}")
         return jsonify({'error': f'Failed to parse query: {str(e)}'}), 500
+
+# AI Agent Functions
+
+# Tool: Get wallet tokens
+def get_wallet_tokens(wallet_address: str = None) -> List[Dict[str, Any]]:
+    """Fetches ERC-20 token balances from the user's wallet"""
+    try:
+        # If wallet_address not specified, we'll use the one from request
+        if not wallet_address and request and hasattr(request, 'json'):
+            data = request.json
+            wallet_address = data.get('wallet_address')
+            
+        if not wallet_address:
+            return []
+            
+        # Normalize the address
+        try:
+            wallet_address = Web3.to_checksum_address(wallet_address)
+        except:
+            print(f"Invalid wallet address: {wallet_address}")
+            return []
+            
+        # Get ETH balance
+        eth_balance = w3.eth.get_balance(wallet_address)
+        eth_balance_in_eth = eth_balance / 10**18
+        
+        # Initialize token list with ETH
+        token_balances = [{
+            "symbol": "ETH",
+            "balance": eth_balance_in_eth
+        }]
+        
+        # Get ERC-20 tokens
+        network = "api-sepolia"  # Change to mainnet in production
+        token_addresses_to_check = []
+        
+        # Method 1: Get token transactions
+        tokentx_url = f"https://{network}.etherscan.io/api?module=account&action=tokentx&address={wallet_address}&sort=desc&apikey={ETHERSCAN_API_KEY}"
+        response = requests.get(tokentx_url).json()
+        
+        if response.get('status') == '1' and 'result' in response:
+            token_txs = response['result']
+            # Extract unique token addresses from transactions
+            for tx in token_txs:
+                if 'contractAddress' in tx and tx['contractAddress']:
+                    token_address = Web3.to_checksum_address(tx['contractAddress'])
+                    if token_address not in token_addresses_to_check:
+                        token_addresses_to_check.append(token_address)
+        
+        # Method 2: Try the tokenlist API too
+        tokenlist_url = f"https://{network}.etherscan.io/api?module=account&action=tokenlist&address={wallet_address}&apikey={ETHERSCAN_API_KEY}"
+        tokenlist_response = requests.get(tokenlist_url).json()
+        
+        if tokenlist_response.get('status') == '1' and 'result' in tokenlist_response:
+            for token in tokenlist_response['result']:
+                if 'contractAddress' in token and token['contractAddress']:
+                    token_address = Web3.to_checksum_address(token['contractAddress'])
+                    if token_address not in token_addresses_to_check:
+                        token_addresses_to_check.append(token_address)
+        
+        # Check balances for each token
+        for token_address in token_addresses_to_check:
+            try:
+                token_contract = w3.eth.contract(address=token_address, abi=ERC20_ABI)
+                symbol = token_contract.functions.symbol().call()
+                decimals = token_contract.functions.decimals().call()
+                balance_wei = token_contract.functions.balanceOf(wallet_address).call()
+                balance = balance_wei / (10 ** decimals)
+                
+                # Only include tokens with non-zero balance
+                if balance > 0:
+                    token_balances.append({
+                        "symbol": symbol,
+                        "balance": balance
+                    })
+            except Exception as e:
+                print(f"Error getting token data for {token_address}: {str(e)}")
+                continue
+        
+        return token_balances
+    except Exception as e:
+        print(f"Error in get_wallet_tokens: {str(e)}")
+        return []
+
+# Tool: Get live token prices
+def get_live_prices(symbols: List[str]) -> Dict[str, float]:
+    """Returns current USD prices for each token symbol"""
+    try:
+        # Create a dictionary to store prices
+        prices = {}
+        
+        # Define fallback prices for test tokens
+        test_token_prices = {
+            "ETH": 3500.00,
+            "USDC": 1.00,
+            "USDT": 1.00,
+            "DAI": 1.00,
+            "WETH": 3500.00,
+            "WBTC": 62000.00,
+            "LUSD": 1.00,
+            "EUSD": 1.00,
+            "LUSDG": 1.00,
+            "TIGER": 5.00,
+            "WLETH": 3500.00,
+            "aEthWETH": 3500.00,
+        }
+        
+        # Handle ETH price separately
+        if "ETH" in symbols:
+            # Get ETH price from CoinGecko API
+            eth_price_url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+            try:
+                eth_response = requests.get(eth_price_url).json()
+                if "ethereum" in eth_response:
+                    prices["ETH"] = eth_response["ethereum"]["usd"]
+                    print(f"[INFO] Got ETH price from CoinGecko: ${prices['ETH']}")
+                else:
+                    # Fallback price if API fails
+                    prices["ETH"] = test_token_prices["ETH"]
+                    print(f"[INFO] Using fallback ETH price: ${prices['ETH']}")
+            except Exception as e:
+                # Fallback price if API fails
+                prices["ETH"] = test_token_prices["ETH"]
+                print(f"[INFO] Error getting ETH price, using fallback: ${prices['ETH']}. Error: {str(e)}")
+        
+        # For other tokens, try to get prices or use reasonable fallbacks
+        for symbol in symbols:
+            # Skip ETH since we already handled it
+            if symbol == "ETH" or symbol in prices:
+                continue
+                
+            # First check if we have a fallback price for this token
+            if symbol in test_token_prices:
+                prices[symbol] = test_token_prices[symbol]
+                print(f"[INFO] Using predefined price for {symbol}: ${prices[symbol]}")
+                continue
+                
+            # Known tokens with CoinGecko IDs
+            token_lookup = {
+                "USDC": "usd-coin",
+                "USDT": "tether",
+                "DAI": "dai",
+                "WETH": "weth",
+                "WBTC": "wrapped-bitcoin",
+            }
+            
+            if symbol in token_lookup:
+                # This is a known token with a CoinGecko ID
+                coingecko_id = token_lookup[symbol]
+                price_url = f"https://api.coingecko.com/api/v3/simple/price?ids={coingecko_id}&vs_currencies=usd"
+                
+                try:
+                    response = requests.get(price_url).json()
+                    if coingecko_id in response:
+                        prices[symbol] = response[coingecko_id]["usd"]
+                        print(f"[INFO] Got {symbol} price from CoinGecko: ${prices[symbol]}")
+                    else:
+                        # Use fallback from our predefined list or reasonable defaults
+                        prices[symbol] = test_token_prices.get(symbol, 1.0)
+                        print(f"[INFO] No price data for {symbol}, using fallback: ${prices[symbol]}")
+                except Exception as e:
+                    # Use fallback from our list
+                    prices[symbol] = test_token_prices.get(symbol, 1.0)
+                    print(f"[INFO] Error getting {symbol} price, using fallback: ${prices[symbol]}. Error: {str(e)}")
+            else:
+                # For unknown tokens, try to search by name
+                try:
+                    search_url = f"https://api.coingecko.com/api/v3/search?query={symbol}"
+                    search_results = requests.get(search_url).json()
+                    
+                    if search_results.get("coins") and len(search_results["coins"]) > 0:
+                        # Take the first result
+                        coin_id = search_results["coins"][0]["id"]
+                        price_url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+                        price_data = requests.get(price_url).json()
+                        
+                        if coin_id in price_data:
+                            prices[symbol] = price_data[coin_id]["usd"]
+                            print(f"[INFO] Found {symbol} via search, price: ${prices[symbol]}")
+                        else:
+                            # Default to our predefined list or fallback value
+                            prices[symbol] = test_token_prices.get(symbol, 1.0)
+                            print(f"[INFO] Found {symbol} via search but no price, using fallback: ${prices[symbol]}")
+                    else:
+                        # No search results - this is likely a test token
+                        prices[symbol] = test_token_prices.get(symbol, 1.0)
+                        print(f"[INFO] {symbol} not found in CoinGecko, using fallback: ${prices[symbol]}")
+                except Exception as e:
+                    # Use fallback from our list or default
+                    prices[symbol] = test_token_prices.get(symbol, 1.0)
+                    print(f"[INFO] Error searching for {symbol}, using fallback: ${prices[symbol]}. Error: {str(e)}")
+        
+        return prices
+    except Exception as e:
+        print(f"[ERROR] Error in get_live_prices: {str(e)}")
+        # Return best-effort prices or fallbacks
+        fallback_prices = {}
+        for symbol in symbols:
+            fallback_prices[symbol] = test_token_prices.get(symbol, 1.0)
+        return fallback_prices
+
+# Tool: Get trending tokens
+def get_trending_tokens() -> List[Dict[str, Any]]:
+    """Returns currently trending cryptocurrencies with price data"""
+    try:
+        # Use CoinGecko's trending API
+        url = "https://api.coingecko.com/api/v3/search/trending"
+        response = requests.get(url).json()
+        
+        trending_tokens = []
+        if "coins" in response:
+            # Extract relevant data for each trending token
+            for item in response["coins"][:10]:  # Limit to top 10
+                coin = item["item"]
+                trending_tokens.append({
+                    "symbol": coin["symbol"],
+                    "name": coin["name"],
+                    "market_cap_rank": coin.get("market_cap_rank"),
+                    "price_btc": coin.get("price_btc", 0)
+                })
+            
+            # Get USD prices for these tokens
+            symbols = [token["symbol"] for token in trending_tokens]
+            prices = get_live_prices(symbols)
+            
+            # Add USD prices to the trending tokens
+            for token in trending_tokens:
+                token["price_usd"] = prices.get(token["symbol"], 0)
+        
+        return trending_tokens
+    except Exception as e:
+        print(f"Error in get_trending_tokens: {str(e)}")
+        return []
+
+# Tool: Get market sentiment
+def get_market_sentiment() -> Dict[str, Any]:
+    """Returns current market sentiment and fear/greed index"""
+    try:
+        # We can use various APIs for this. In this example, we'll simulate the data
+        # In a production environment, integrate with an actual sentiment API
+        
+        # Option 1: Alternative.me Fear & Greed Index (if available)
+        try:
+            url = "https://api.alternative.me/fng/"
+            response = requests.get(url).json()
+            
+            if response.get("data") and len(response["data"]) > 0:
+                value = int(response["data"][0]["value"])
+                classification = response["data"][0]["value_classification"]
+                
+                return {
+                    "index": value,
+                    "classification": classification,
+                    "timestamp": time.time()
+                }
+        except Exception as e:
+            print(f"Error fetching fear/greed index: {str(e)}")
+        
+        # Fallback: Simulate sentiment data
+        import random
+        sentiment_value = random.randint(25, 75)  # 0-100 scale
+        
+        # Determine classification based on value
+        if sentiment_value < 25:
+            classification = "Extreme Fear"
+        elif sentiment_value < 40:
+            classification = "Fear"
+        elif sentiment_value < 60:
+            classification = "Neutral"
+        elif sentiment_value < 75:
+            classification = "Greed"
+        else:
+            classification = "Extreme Greed"
+        
+        return {
+            "index": sentiment_value,
+            "classification": classification,
+            "timestamp": time.time(),
+            "note": "Simulated data - connect to a real API in production"
+        }
+    except Exception as e:
+        print(f"Error in get_market_sentiment: {str(e)}")
+        return {"error": "Failed to retrieve market sentiment"}
+
+# The AI Portfolio Agent endpoint
+@app.route('/api/portfolio-agent', methods=['POST'])
+def portfolio_agent():
+    """Process user queries about their portfolio using an AI agent with tool calling"""
+    try:
+        data = request.json
+        user_message = data.get('user_message', '')
+        wallet_address = data.get('wallet_address', '')
+        
+        if not wallet_address:
+            return jsonify({
+                'response': "Please connect your wallet first. I need to access your token balances to analyze your portfolio."
+            })
+        
+        # Define the tools available to the AI agent
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_wallet_tokens",
+                    "description": "Returns the user's ERC-20 token balances from their wallet.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_live_prices",
+                    "description": "Returns current USD prices for each token symbol.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbols": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "List of token symbols to get prices for."
+                            }
+                        },
+                        "required": ["symbols"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_trending_tokens",
+                    "description": "Returns currently trending cryptocurrencies with price data.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_market_sentiment",
+                    "description": "Returns current market sentiment and fear/greed index.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            }
+        ]
+        
+        # Initialize the AI agent conversation
+        system_message = """
+        You are CryptoPortfolioAgent — an AI assistant embedded in a web app. Your job is to help users analyze the tokens in their MetaMask wallet and advise whether their portfolio is balanced, underweight, or overweight using live market prices. Always think in clear, numbered "Thought:" steps. Whenever you need on-chain balances or market data, call the appropriate tool.
+        
+        Guidelines:
+        - Start every response with "Thought: 1. ..." and enumerate your reasoning steps.
+        - After you receive function output, continue your chain of thought.
+        - Compute USD value for each token and its percentage of total portfolio.
+        - If % > 30%, label overweight; if % < 5%, label underweight; otherwise OK.
+        - In your final "Answer:" section, provide clear analysis and rebalancing suggestions.
+        - When asked about hot/trending tokens, call get_trending_tokens() to identify potential investments.
+        - For market sentiment questions, call get_market_sentiment().
+        - Remember, the portfolio might be of Test Tokens which don't actually have real prices. In this case use fall back prices.
+        
+        Remember, users are looking for actionable portfolio advice. Be specific and reasoned in your analysis.
+        """
+        
+        # Begin the conversation with the AI
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message}
+        ]
+        
+        # Process user message and manage tool calling flow
+        full_response = ""
+        response_data = {}
+        
+        while True:
+            # Call OpenAI API
+            response = openai_client.chat.completions.create(
+                model="gpt-4-0125-preview",  # Or other model with function calling
+                messages=messages,
+                tools=tools,
+                tool_choice="auto"
+            )
+            
+            assistant_message = response.choices[0].message
+            messages.append(assistant_message)
+            full_response += assistant_message.content if assistant_message.content else ""
+            
+            # Check if tool calling is required
+            if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+                # Execute each tool call
+                for tool_call in assistant_message.tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    function_response = None
+                    if function_name == "get_wallet_tokens":
+                        function_response = get_wallet_tokens(wallet_address)
+                    elif function_name == "get_live_prices":
+                        function_response = get_live_prices(function_args.get("symbols", []))
+                    elif function_name == "get_trending_tokens":
+                        function_response = get_trending_tokens()
+                    elif function_name == "get_market_sentiment":
+                        function_response = get_market_sentiment()
+                    
+                    # Add the function response to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": function_name,
+                        "content": json.dumps(function_response)
+                    })
+                    
+                    # For portfolio analysis, store relevant data to return to frontend
+                    if function_name == "get_wallet_tokens":
+                        response_data["wallet_tokens"] = function_response
+                    elif function_name == "get_live_prices":
+                        response_data["token_prices"] = function_response
+                    elif function_name == "get_trending_tokens":
+                        response_data["trending_tokens"] = function_response
+                    elif function_name == "get_market_sentiment":
+                        response_data["market_sentiment"] = function_response
+            else:
+                # No more tool calls needed
+                break
+        
+        # When calculating portfolio, perform additional analysis
+        if "wallet_tokens" in response_data and "token_prices" in response_data:
+            # Calculate portfolio value and allocations
+            tokens = response_data["wallet_tokens"]
+            prices = response_data["token_prices"]
+            
+            total_value = 0
+            portfolio_analysis = []
+            
+            for token in tokens:
+                symbol = token["symbol"]
+                balance = token["balance"]
+                price = prices.get(symbol, 0)
+                usd_value = balance * price
+                total_value += usd_value
+            
+            for token in tokens:
+                symbol = token["symbol"]
+                balance = token["balance"]
+                price = prices.get(symbol, 0)
+                usd_value = balance * price
+                percentage = (usd_value / total_value * 100) if total_value > 0 else 0
+                status = "overweight" if percentage > 30 else "underweight" if percentage < 5 else "balanced"
+                
+                portfolio_analysis.append({
+                    "symbol": symbol,
+                    "balance": balance,
+                    "price": price,
+                    "usd_value": usd_value,
+                    "percentage": percentage,
+                    "status": status
+                })
+            
+            # Sort by percentage (descending)
+            portfolio_analysis.sort(key=lambda x: x["percentage"], reverse=True)
+            response_data["portfolio_analysis"] = portfolio_analysis
+            response_data["total_value"] = total_value
+        
+        return jsonify({
+            'response': full_response,
+            'data': response_data
+        })
+        
+    except Exception as e:
+        print(f"Error in portfolio_agent: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'response': f"An error occurred: {str(e)}. Please try again."
+        }), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)

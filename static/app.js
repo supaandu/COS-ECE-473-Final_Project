@@ -47,6 +47,21 @@ function setupEventListeners() {
   document
     .getElementById("parse-query")
     .addEventListener("click", parseNaturalLanguageQuery);
+    
+  // AI Portfolio Agent button
+  document
+    .getElementById("ask-agent")
+    .addEventListener("click", askPortfolioAgent);
+    
+  // Allow pressing Enter to submit agent query
+  document
+    .getElementById("agent-query")
+    .addEventListener("keypress", function(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        askPortfolioAgent();
+      }
+    });
 }
 
 async function checkConnection() {
@@ -209,8 +224,22 @@ async function detectTokens() {
     }
 
     tokens = data.tokens;
+    
+    // Check if we received prices from the backend
+    if (data.prices) {
+      console.log("Using live prices from backend:", data.prices);
+      prices = data.prices; // Store the live prices
+    } else {
+      // Fallback to placeholder prices if API didn't return any
+      console.log("No prices received from backend, using fallbacks");
+      const tempPrices = {};
+      Object.keys(tokens).forEach((symbol) => {
+        tempPrices[symbol] = symbol === "ETH" ? 3500 : 1.0;
+      });
+      prices = tempPrices;
+    }
 
-    // Display tokens
+    // Display tokens with the prices we got
     displayTokens();
   } catch (error) {
     console.error("Error detecting tokens:", error);
@@ -228,21 +257,30 @@ function displayTokens() {
   const allocationForm = document.getElementById("allocation-form");
   allocationForm.innerHTML = "";
 
-  // Estimate total portfolio value and placeholder prices
-  const tempPrices = {};
+  // Calculate total portfolio value using the live prices
+  // already obtained from the backend
+  console.log("Using prices in displayTokens:", prices);
+  
   let totalValue = 0;
-
   Object.keys(tokens).forEach((symbol) => {
-    tempPrices[symbol] = symbol === "ETH" ? 1500 : 1.0;
-    totalValue += tokens[symbol].balance * tempPrices[symbol];
+    // Use the prices we already have - don't override them
+    const price = prices[symbol] || 0;
+    totalValue += tokens[symbol].balance * price;
   });
-
-  prices = tempPrices;
 
   const currentAllocation = {};
   Object.keys(tokens).forEach((symbol) => {
-    const value = tokens[symbol].balance * prices[symbol];
-    currentAllocation[symbol] = (value / totalValue) * 100;
+    // Safely calculate token value handling possible zero or undefined prices
+    const price = prices[symbol] || 0;
+    const value = tokens[symbol].balance * price;
+    
+    // Safely calculate percentage handling potential divide by zero
+    if (totalValue > 0) {
+      currentAllocation[symbol] = (value / totalValue) * 100;
+    } else {
+      // If total value is zero, distribute equally
+      currentAllocation[symbol] = 100 / Object.keys(tokens).length;
+    }
   });
 
   updateTokenDisplay(currentAllocation, totalValue);
@@ -304,37 +342,37 @@ function updateTokenDisplay(currentAllocation, totalValue) {
   const allocationForm = document.getElementById("allocation-form");
   allocationForm.innerHTML = "";
 
-  // Update total value display
-  document.getElementById("total-value").textContent = totalValue.toFixed(2);
+  // Update total value display with safeguard for undefined
+  document.getElementById("total-value").textContent = (totalValue || 0).toFixed(2);
 
   // Display tokens and create allocation inputs
   Object.keys(tokens).forEach((symbol) => {
-    const token = tokens[symbol];
-    const price = prices[symbol];
-    const value = token.balance * price;
-    const percentage = currentAllocation[symbol];
+    // Add safeguards for each property
+    const token = tokens[symbol] || {};
+    const price = prices ? (prices[symbol] || 0) : 0;
+    const balance = token.balance || 0;
+    const value = balance * price;
+    const percentage = currentAllocation ? (currentAllocation[symbol] || 0) : 0;
 
-    // Create token row
+    // Create token row with null checks
     const row = document.createElement("tr");
     row.className = "token-row";
     row.innerHTML = `
             <td>${symbol}</td>
-            <td>${token.balance.toFixed(6)}</td>
+            <td>${balance.toFixed(6)}</td>
             <td>$${value.toFixed(2)} ($${price.toFixed(2)}/token)</td>
             <td>${percentage.toFixed(2)}%</td>
             <td id="target-${symbol}">0%</td>
         `;
     tokensTable.appendChild(row);
 
-    // Create allocation input
+    // Create allocation input with safe value handling
     const inputGroup = document.createElement("div");
     inputGroup.className = "input-group mb-2";
     inputGroup.innerHTML = `
             <span class="input-group-text">${symbol}</span>
             <input type="number" class="form-control allocation-input" id="allocation-${symbol}" 
-                   min="0" max="100" step="0.001" value="${percentage.toFixed(
-                     3
-                   )}" 
+                   min="0" max="100" step="0.001" value="${percentage.toFixed(3)}" 
                    data-token="${symbol}">
             <span class="input-group-text">%</span>
         `;
@@ -994,4 +1032,138 @@ async function getActions(currentTokens) {
     console.error("Error calculating rebalance:", error);
     return [];
   }
+}
+
+// Portfolio Agent Functions
+async function askPortfolioAgent() {
+  if (!wallet) {
+    alert("Please connect your wallet first");
+    return;
+  }
+  
+  const userQuery = document.getElementById("agent-query").value.trim();
+  if (!userQuery) {
+    alert("Please enter a question for the AI agent");
+    return;
+  }
+  
+  // Show loading indicator
+  document.getElementById("agent-loading").classList.remove("d-none");
+  document.getElementById("agent-response").classList.add("d-none");
+  document.getElementById("trending-tokens-container").classList.add("d-none");
+  document.getElementById("market-sentiment-container").classList.add("d-none");
+  
+  try {
+    // Call the portfolio agent API
+    const response = await fetch("/api/portfolio-agent", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_message: userQuery,
+        wallet_address: wallet
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error);
+    }
+    
+    // Display the AI response
+    const agentResponse = document.getElementById("agent-response");
+    agentResponse.querySelector("pre").textContent = data.response;
+    agentResponse.classList.remove("d-none");
+    
+    // Process additional data if available
+    if (data.data) {
+      // Check if we have trending tokens to display
+      if (data.data.trending_tokens && data.data.trending_tokens.length > 0) {
+        displayTrendingTokens(data.data.trending_tokens);
+      }
+      
+      // Check if we have market sentiment data
+      if (data.data.market_sentiment) {
+        displayMarketSentiment(data.data.market_sentiment);
+      }
+    }
+  } catch (error) {
+    console.error("Error querying portfolio agent:", error);
+    document.getElementById("agent-response").classList.remove("d-none");
+    document.getElementById("agent-response").querySelector("pre").textContent = 
+      `Error: ${error.message}. Please try again.`;
+  } finally {
+    // Hide loading indicator
+    document.getElementById("agent-loading").classList.add("d-none");
+  }
+}
+
+// Helper function to display trending tokens
+function displayTrendingTokens(trendingTokens) {
+  const container = document.getElementById("trending-tokens-container");
+  const tableBody = document.getElementById("trending-tokens-table");
+  tableBody.innerHTML = "";
+  
+  trendingTokens.forEach(token => {
+    const row = document.createElement("tr");
+    
+    // Token Symbol
+    const symbolCell = document.createElement("td");
+    symbolCell.textContent = token.symbol;
+    row.appendChild(symbolCell);
+    
+    // Token Name
+    const nameCell = document.createElement("td");
+    nameCell.textContent = token.name;
+    row.appendChild(nameCell);
+    
+    // Price USD
+    const priceCell = document.createElement("td");
+    priceCell.textContent = token.price_usd ? `$${token.price_usd.toFixed(2)}` : "N/A";
+    row.appendChild(priceCell);
+    
+    // Market Cap Rank
+    const rankCell = document.createElement("td");
+    rankCell.textContent = token.market_cap_rank || "N/A";
+    row.appendChild(rankCell);
+    
+    tableBody.appendChild(row);
+  });
+  
+  container.classList.remove("d-none");
+}
+
+// Helper function to display market sentiment
+function displayMarketSentiment(sentimentData) {
+  const container = document.getElementById("market-sentiment-container");
+  const valueElement = document.getElementById("sentiment-value");
+  const labelElement = document.getElementById("sentiment-label");
+  const pointerElement = document.getElementById("sentiment-pointer");
+  
+  // Update the display
+  valueElement.textContent = sentimentData.index;
+  labelElement.textContent = sentimentData.classification;
+  
+  // Set pointer position (0-100%)
+  const position = sentimentData.index + "%";
+  pointerElement.style.left = position;
+  
+  // Set the appropriate color for the label
+  labelElement.className = "badge ms-2";
+  
+  if (sentimentData.index < 25) {
+    labelElement.classList.add("bg-danger"); // Extreme Fear
+  } else if (sentimentData.index < 40) {
+    labelElement.classList.add("bg-warning"); // Fear
+  } else if (sentimentData.index < 60) {
+    labelElement.classList.add("bg-success"); // Neutral
+  } else if (sentimentData.index < 75) {
+    labelElement.classList.add("bg-primary"); // Greed
+  } else {
+    labelElement.classList.add("bg-info"); // Extreme Greed
+  }
+  
+  container.classList.remove("d-none");
 }
