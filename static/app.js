@@ -1051,7 +1051,6 @@ async function askPortfolioAgent() {
   document.getElementById("agent-loading").classList.remove("d-none");
   document.getElementById("agent-response").classList.add("d-none");
   document.getElementById("trending-tokens-container").classList.add("d-none");
-  document.getElementById("market-sentiment-container").classList.add("d-none");
   
   try {
     // Call the portfolio agent API
@@ -1082,11 +1081,6 @@ async function askPortfolioAgent() {
       // Check if we have trending tokens to display
       if (data.data.trending_tokens && data.data.trending_tokens.length > 0) {
         displayTrendingTokens(data.data.trending_tokens);
-      }
-      
-      // Check if we have market sentiment data
-      if (data.data.market_sentiment) {
-        displayMarketSentiment(data.data.market_sentiment);
       }
     }
   } catch (error) {
@@ -1135,35 +1129,4 @@ function displayTrendingTokens(trendingTokens) {
   container.classList.remove("d-none");
 }
 
-// Helper function to display market sentiment
-function displayMarketSentiment(sentimentData) {
-  const container = document.getElementById("market-sentiment-container");
-  const valueElement = document.getElementById("sentiment-value");
-  const labelElement = document.getElementById("sentiment-label");
-  const pointerElement = document.getElementById("sentiment-pointer");
-  
-  // Update the display
-  valueElement.textContent = sentimentData.index;
-  labelElement.textContent = sentimentData.classification;
-  
-  // Set pointer position (0-100%)
-  const position = sentimentData.index + "%";
-  pointerElement.style.left = position;
-  
-  // Set the appropriate color for the label
-  labelElement.className = "badge ms-2";
-  
-  if (sentimentData.index < 25) {
-    labelElement.classList.add("bg-danger"); // Extreme Fear
-  } else if (sentimentData.index < 40) {
-    labelElement.classList.add("bg-warning"); // Fear
-  } else if (sentimentData.index < 60) {
-    labelElement.classList.add("bg-success"); // Neutral
-  } else if (sentimentData.index < 75) {
-    labelElement.classList.add("bg-primary"); // Greed
-  } else {
-    labelElement.classList.add("bg-info"); // Extreme Greed
-  }
-  
-  container.classList.remove("d-none");
-}
+

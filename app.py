@@ -2,8 +2,7 @@ import os
 import json
 import requests
 import time
-import re
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from web3 import Web3
@@ -86,24 +85,24 @@ def detect_tokens():
             "balance": eth_balance_in_eth,
             "symbol": "ETH"
         }
-        print(f"[DEBUG] Added ETH with balance: {eth_balance_in_eth}")
+        print(f"Added ETH with balance: {eth_balance_in_eth}")
     
     # STEP 1: Use Etherscan API to get all tokens the address has interacted with
     # This will find ALL tokens, not just ETH
     network = "api-sepolia"  # Correct API endpoint for Sepolia
     token_addresses_to_check = []
     
-    print(f"[DEBUG] Fetching ALL tokens for wallet {wallet_address}")
+    print(f"Fetching ALL tokens for wallet {wallet_address}")
     
     try:
         # Method 1: Get token transactions (works better for testnets than tokenlist)
         tokentx_url = f"https://{network}.etherscan.io/api?module=account&action=tokentx&address={wallet_address}&sort=desc&apikey={ETHERSCAN_API_KEY}"
-        print(f"[DEBUG] Calling Etherscan API: {tokentx_url}")
+        print(f"Calling Etherscan API: {tokentx_url}")
         response = requests.get(tokentx_url).json()
         
         if response.get('status') == '1' and 'result' in response:
             token_txs = response['result']
-            print(f"[DEBUG] Found {len(token_txs)} token transactions")
+            print(f"Found {len(token_txs)} token transactions")
             
             # Extract unique token addresses from transactions
             for tx in token_txs:
@@ -112,18 +111,18 @@ def detect_tokens():
                     if token_address not in token_addresses_to_check:
                         token_addresses_to_check.append(token_address)
             
-            print(f"[DEBUG] Found {len(token_addresses_to_check)} unique token addresses from transactions")
+            print(f"Found {len(token_addresses_to_check)} unique token addresses from transactions")
         else:
-            print(f"[DEBUG] Etherscan tokentx API error: {response.get('message', 'Unknown error')}")
+            print(f"Etherscan tokentx API error: {response.get('message', 'Unknown error')}")
         
         # Method 2: Try the tokenlist API too (better for mainnet)
         tokenlist_url = f"https://{network}.etherscan.io/api?module=account&action=tokenlist&address={wallet_address}&apikey={ETHERSCAN_API_KEY}"
-        print(f"[DEBUG] Calling Etherscan tokenlist API: {tokenlist_url}")
+        print(f"Calling Etherscan tokenlist API: {tokenlist_url}")
         tokenlist_response = requests.get(tokenlist_url).json()
         
         if tokenlist_response.get('status') == '1' and 'result' in tokenlist_response:
             tokens_data = tokenlist_response['result']
-            print(f"[DEBUG] Found {len(tokens_data)} tokens from tokenlist")
+            print(f"Found {len(tokens_data)} tokens from tokenlist")
             
             for token_data in tokens_data:
                 try:
@@ -132,14 +131,14 @@ def detect_tokens():
                         if token_address not in token_addresses_to_check:
                             token_addresses_to_check.append(token_address)
                 except Exception as e:
-                    print(f"[DEBUG] Error processing tokenlist data: {str(e)}")
+                    print(f"Error processing tokenlist data: {str(e)}")
         else:
-            print(f"[DEBUG] Etherscan tokenlist API error: {tokenlist_response.get('message', 'Unknown error')}")
+            print(f"Etherscan tokenlist API error: {tokenlist_response.get('message', 'Unknown error')}")
     except Exception as e:
-        print(f"[DEBUG] Error fetching token data from Etherscan: {str(e)}")
+        print(f"Error fetching token data from Etherscan: {str(e)}")
     
     # STEP 2: Now check the balance of each token address we found
-    print(f"[DEBUG] Checking balances for {len(token_addresses_to_check)} tokens")
+    print(f"Checking balances for {len(token_addresses_to_check)} tokens")
     for token_address in token_addresses_to_check:
         try:
             token_contract = w3.eth.contract(
@@ -153,7 +152,7 @@ def detect_tokens():
             raw_balance = token_contract.functions.balanceOf(wallet_address).call()
             token_balance = raw_balance / (10 ** decimals)
             
-            print(f"[DEBUG] Token {symbol} at {token_address} has balance: {token_balance}")
+            print(f"Token {symbol} at {token_address} has balance: {token_balance}")
             
             # Only add tokens with non-zero balance
             if token_balance > 0:
@@ -164,9 +163,9 @@ def detect_tokens():
                     "symbol": symbol,
                     "coingecko_id": token_address.lower()
                 }
-                print(f"[DEBUG] Added token {symbol} with balance {token_balance}")
+                print(f"Added token {symbol} with balance {token_balance}")
         except Exception as e:
-            print(f"[DEBUG] Error checking token {token_address}: {str(e)}")
+            print(f"Error checking token {token_address}: {str(e)}")
     
     # As a fallback or supplement, also check token addresses provided by the frontend
     if 'token_addresses' in data and isinstance(data['token_addresses'], list):
@@ -211,12 +210,12 @@ def detect_tokens():
     
     # Get live prices for all tokens using the same function that the AI agent uses
     token_symbols = list(detected_tokens.keys())
-    print(f"[DEBUG] Getting live prices for {len(token_symbols)} tokens: {token_symbols}")
+    print(f"Getting live prices for {len(token_symbols)} tokens: {token_symbols}")
     
     try:
         # Get accurate prices using the same function the AI agent uses
         token_prices = get_live_prices(token_symbols)
-        print(f"[DEBUG] Got prices: {token_prices}")
+        print(f"Got prices: {token_prices}")
         
         # Return both tokens and their live prices
         return jsonify({
@@ -225,7 +224,7 @@ def detect_tokens():
             'prices': token_prices  # Add real prices to the response
         })
     except Exception as e:
-        print(f"[ERROR] Failed to get live prices: {str(e)}")
+        print(f"Failed to get live prices: {str(e)}")
         # Fall back to just tokens if price fetch fails
         return jsonify({
             'wallet': wallet_address,
@@ -236,7 +235,7 @@ def detect_tokens():
 def calculate_rebalance():
     try:
         data = request.json
-        print(f"[DEBUG] /api/calculate_rebalance received data: {data}")
+        print(f"/api/calculate_rebalance received data: {data}")
         
         if not data:
             return jsonify({'error': 'No data received'}), 400
@@ -250,8 +249,8 @@ def calculate_rebalance():
         tokens = data['tokens']
         target_allocation = data['target_allocation']
         
-        print(f"[DEBUG] Tokens: {tokens}")
-        print(f"[DEBUG] Target allocation: {target_allocation}")
+        print(f"Tokens: {tokens}")
+        print(f"Target allocation: {target_allocation}")
         
         # Get token prices from CoinGecko
         token_prices = {}
@@ -302,10 +301,10 @@ def calculate_rebalance():
             if total_value == 0:
                 return jsonify({'error': 'Total portfolio value is zero'}), 400
         except Exception as e:
-            print(f"[ERROR] Failed to calculate total value: {str(e)}")
+            print(f"Failed to calculate total value: {str(e)}")
             # Print the tokens and prices for debugging
             for token in tokens:
-                print(f"[DEBUG] Token: {token}, Balance: {tokens[token].get('balance')}, Price: {token_prices.get(token)}")
+                print(f"Token: {token}, Balance: {tokens[token].get('balance')}, Price: {token_prices.get(token)}")
             return jsonify({'error': f'Error calculating portfolio value: {str(e)}'}), 500
     
         # Calculate current allocation percentages
@@ -324,7 +323,7 @@ def calculate_rebalance():
                     amount_usd = abs(diff) * total_value / 100
                     token_price = token_prices[token]
                     token_amount = amount_usd / token_price
-                    print(f"[DEBUG] {token} diff: {diff}, amount_usd: {amount_usd}, token_amount: {token_amount}")
+                    print(f"{token} diff: {diff}, amount_usd: {amount_usd}, token_amount: {token_amount}")
                     actions.append({
                         'token': token,
                         'action': direction,
@@ -340,11 +339,11 @@ def calculate_rebalance():
             'token_prices': token_prices
         }
         
-        print(f"[DEBUG] Sending response: {response_data}")
+        print(f"Sending response: {response_data}")
         return jsonify(response_data)
         
     except Exception as e:
-        print(f"[ERROR] Unhandled exception in calculate_rebalance: {str(e)}")
+        print(f"Unhandled exception in calculate_rebalance: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
@@ -365,7 +364,6 @@ def parse_query():
                 {"role": "system", "content": "You are a financial assistant that extracts target portfolio allocations from user queries. Extract token symbols and their target percentage allocations. Return ONLY a valid JSON object with token symbols as keys and percentage values as numbers. Format: {\"TOKEN1\": 25, \"TOKEN2\": 75}. The response must be valid JSON with no additional text, markdown, or formatting."},
                 {"role": "user", "content": user_query}
             ]
-            # Removed response_format parameter that was causing errors
         )
         
         # Extract the response content and parse it as JSON
@@ -593,7 +591,7 @@ def get_live_prices(symbols: List[str]) -> Dict[str, float]:
         
         return prices
     except Exception as e:
-        print(f"[ERROR] Error in get_live_prices: {str(e)}")
+        print(f"Error in get_live_prices: {str(e)}")
         # Return best-effort prices or fallbacks
         fallback_prices = {}
         for symbol in symbols:
@@ -632,56 +630,6 @@ def get_trending_tokens() -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error in get_trending_tokens: {str(e)}")
         return []
-
-# Tool: Get market sentiment
-def get_market_sentiment() -> Dict[str, Any]:
-    """Returns current market sentiment and fear/greed index"""
-    try:
-        # We can use various APIs for this. In this example, we'll simulate the data
-        # In a production environment, integrate with an actual sentiment API
-        
-        # Option 1: Alternative.me Fear & Greed Index (if available)
-        try:
-            url = "https://api.alternative.me/fng/"
-            response = requests.get(url).json()
-            
-            if response.get("data") and len(response["data"]) > 0:
-                value = int(response["data"][0]["value"])
-                classification = response["data"][0]["value_classification"]
-                
-                return {
-                    "index": value,
-                    "classification": classification,
-                    "timestamp": time.time()
-                }
-        except Exception as e:
-            print(f"Error fetching fear/greed index: {str(e)}")
-        
-        # Fallback: Simulate sentiment data
-        import random
-        sentiment_value = random.randint(25, 75)  # 0-100 scale
-        
-        # Determine classification based on value
-        if sentiment_value < 25:
-            classification = "Extreme Fear"
-        elif sentiment_value < 40:
-            classification = "Fear"
-        elif sentiment_value < 60:
-            classification = "Neutral"
-        elif sentiment_value < 75:
-            classification = "Greed"
-        else:
-            classification = "Extreme Greed"
-        
-        return {
-            "index": sentiment_value,
-            "classification": classification,
-            "timestamp": time.time(),
-            "note": "Simulated data - connect to a real API in production"
-        }
-    except Exception as e:
-        print(f"Error in get_market_sentiment: {str(e)}")
-        return {"error": "Failed to retrieve market sentiment"}
 
 # The AI Portfolio Agent endpoint
 @app.route('/api/portfolio-agent', methods=['POST'])
@@ -742,18 +690,6 @@ def portfolio_agent():
                         "required": []
                     }
                 }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_market_sentiment",
-                    "description": "Returns current market sentiment and fear/greed index.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                }
             }
         ]
         
@@ -768,7 +704,6 @@ def portfolio_agent():
         - If % > 30%, label overweight; if % < 5%, label underweight; otherwise OK.
         - In your final "Answer:" section, provide clear analysis and rebalancing suggestions.
         - When asked about hot/trending tokens, call get_trending_tokens() to identify potential investments.
-        - For market sentiment questions, call get_market_sentiment().
         - Remember, the portfolio might be of Test Tokens which don't actually have real prices. In this case use fall back prices.
         
         Remember, users are looking for actionable portfolio advice. Be specific and reasoned in your analysis.
@@ -811,8 +746,6 @@ def portfolio_agent():
                         function_response = get_live_prices(function_args.get("symbols", []))
                     elif function_name == "get_trending_tokens":
                         function_response = get_trending_tokens()
-                    elif function_name == "get_market_sentiment":
-                        function_response = get_market_sentiment()
                     
                     # Add the function response to messages
                     messages.append({
@@ -829,8 +762,6 @@ def portfolio_agent():
                         response_data["token_prices"] = function_response
                     elif function_name == "get_trending_tokens":
                         response_data["trending_tokens"] = function_response
-                    elif function_name == "get_market_sentiment":
-                        response_data["market_sentiment"] = function_response
             else:
                 # No more tool calls needed
                 break
