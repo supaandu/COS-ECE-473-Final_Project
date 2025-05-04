@@ -87,58 +87,12 @@ def detect_tokens():
         }
         print(f"Added ETH with balance: {eth_balance_in_eth}")
     
-    # STEP 1: Use Etherscan API to get all tokens the address has interacted with
-    # This will find ALL tokens, not just ETH
-    network = "api-sepolia"  # Correct API endpoint for Sepolia
-    token_addresses_to_check = []
-    
-    print(f"Fetching ALL tokens for wallet {wallet_address}")
-    
-    try:
-        # Method 1: Get token transactions (works better for testnets than tokenlist)
-        tokentx_url = f"https://{network}.etherscan.io/api?module=account&action=tokentx&address={wallet_address}&sort=desc&apikey={ETHERSCAN_API_KEY}"
-        print(f"Calling Etherscan API: {tokentx_url}")
-        response = requests.get(tokentx_url).json()
-        
-        if response.get('status') == '1' and 'result' in response:
-            token_txs = response['result']
-            print(f"Found {len(token_txs)} token transactions")
-            
-            # Extract unique token addresses from transactions
-            for tx in token_txs:
-                if 'contractAddress' in tx and tx['contractAddress']:
-                    token_address = Web3.to_checksum_address(tx['contractAddress'])
-                    if token_address not in token_addresses_to_check:
-                        token_addresses_to_check.append(token_address)
-            
-            print(f"Found {len(token_addresses_to_check)} unique token addresses from transactions")
-        else:
-            print(f"Etherscan tokentx API error: {response.get('message', 'Unknown error')}")
-        
-        # Method 2: Try the tokenlist API too (better for mainnet)
-        tokenlist_url = f"https://{network}.etherscan.io/api?module=account&action=tokenlist&address={wallet_address}&apikey={ETHERSCAN_API_KEY}"
-        print(f"Calling Etherscan tokenlist API: {tokenlist_url}")
-        tokenlist_response = requests.get(tokenlist_url).json()
-        
-        if tokenlist_response.get('status') == '1' and 'result' in tokenlist_response:
-            tokens_data = tokenlist_response['result']
-            print(f"Found {len(tokens_data)} tokens from tokenlist")
-            
-            for token_data in tokens_data:
-                try:
-                    if 'contractAddress' in token_data and token_data['contractAddress']:
-                        token_address = Web3.to_checksum_address(token_data['contractAddress'])
-                        if token_address not in token_addresses_to_check:
-                            token_addresses_to_check.append(token_address)
-                except Exception as e:
-                    print(f"Error processing tokenlist data: {str(e)}")
-        else:
-            print(f"Etherscan tokenlist API error: {tokenlist_response.get('message', 'Unknown error')}")
-    except Exception as e:
-        print(f"Error fetching token data from Etherscan: {str(e)}")
+    # Get token addresses from Etherscan
+    print(f"Fetching tokens for wallet {wallet_address}")
+    token_addresses_to_check = _fetch_token_addresses(wallet_address)
     
     # STEP 2: Now check the balance of each token address we found
-    print(f"Checking balances for {len(token_addresses_to_check)} tokens")
+    print(f"Checking balances for {len(token_addresses_to_check)} tokens...")
     for token_address in token_addresses_to_check:
         try:
             token_contract = w3.eth.contract(
@@ -192,6 +146,12 @@ def detect_tokens():
                 
                 # Get token info
                 symbol = token_contract.functions.symbol().call()
+                name = None
+                try:
+                    name = token_contract.functions.name().call()
+                except:
+                    name = symbol  # Fallback to symbol if name isn't available
+                
                 decimals = token_contract.functions.decimals().call()
                 raw_balance = token_contract.functions.balanceOf(wallet_address).call()
                 token_balance = raw_balance / (10 ** decimals)
@@ -237,14 +197,12 @@ def calculate_rebalance():
         data = request.json
         print(f"/api/calculate_rebalance received data: {data}")
         
-        if not data:
-            return jsonify({'error': 'No data received'}), 400
-            
-        if not data.get('tokens'):
-            return jsonify({'error': 'Missing tokens data'}), 400
-            
-        if not data.get('target_allocation'):
-            return jsonify({'error': 'Missing target allocation data'}), 400
+        # Validate required fields with a single check
+        required_fields = ['tokens', 'target_allocation']
+        missing = [field for field in required_fields if field not in data]
+        
+        if not data or missing:
+            return jsonify({'error': f'Missing required data: {", ".join(missing) if missing else "request body"}'}), 400
         
         tokens = data['tokens']
         target_allocation = data['target_allocation']
@@ -252,43 +210,9 @@ def calculate_rebalance():
         print(f"Tokens: {tokens}")
         print(f"Target allocation: {target_allocation}")
         
-        # Get token prices from CoinGecko
-        token_prices = {}
-        
-        # Get ETH price
-        try:
-            eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd').json()
-            token_prices['ETH'] = eth_response['ethereum']['usd']
-        except Exception as e:
-            print(f"Error fetching ETH price: {e}")
-            token_prices['ETH'] = 1500  # Fallback price
-    
-        # For all other tokens, try to get prices from CoinGecko
-        # First, collect CoinGecko IDs or contract addresses
-        token_addresses = []
-        for symbol, token_data in tokens.items():
-            if symbol != 'ETH' and token_data.get('address'):
-                token_addresses.append(token_data['address'].lower())
-    
-        if token_addresses:
-            try:
-                # Use CoinGecko contract address endpoint
-                addresses_str = ','.join(token_addresses)
-                token_response = requests.get(
-                    f'https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses={addresses_str}&vs_currencies=usd'
-                ).json()
-                
-                # Process response and map back to symbols
-                for symbol, token_data in tokens.items():
-                    if symbol != 'ETH' and token_data.get('address'):
-                        address_key = token_data['address'].lower()
-                        if address_key in token_response and 'usd' in token_response[address_key]:
-                            token_prices[symbol] = token_response[address_key]['usd']
-                        else:
-                            # If price not found, use fallback
-                            token_prices[symbol] = 1.0  # Fallback price
-            except Exception as e:
-                print(f"Error fetching token prices: {e}")
+        # Get token prices using our existing get_live_prices function
+        token_symbols = list(tokens.keys())
+        token_prices = get_live_prices(token_symbols)
     
         # Add fallback prices for any tokens that weren't found
         for symbol in tokens:
@@ -398,88 +322,122 @@ def parse_query():
         print(f"Error parsing query with OpenAI: {str(e)}")
         return jsonify({'error': f'Failed to parse query: {str(e)}'}), 500
 
-# AI Agent Functions
-
-# Tool: Get wallet tokens
-def get_wallet_tokens(wallet_address: str = None) -> List[Dict[str, Any]]:
-    """Fetches ERC-20 token balances from the user's wallet"""
+# Helper functions
+def _fetch_token_addresses(wallet_address: str) -> list:
+    """Helper function to fetch token addresses from Etherscan"""
+    token_addresses = []
+    network = "api-sepolia"  # Correct API endpoint for Sepolia
+    
     try:
-        # If wallet_address not specified, we'll use the one from request
-        if not wallet_address and request and hasattr(request, 'json'):
-            data = request.json
-            wallet_address = data.get('wallet_address')
-            
-        if not wallet_address:
-            return []
-            
-        # Normalize the address
-        try:
-            wallet_address = Web3.to_checksum_address(wallet_address)
-        except:
-            print(f"Invalid wallet address: {wallet_address}")
-            return []
-            
-        # Get ETH balance
-        eth_balance = w3.eth.get_balance(wallet_address)
-        eth_balance_in_eth = eth_balance / 10**18
-        
-        # Initialize token list with ETH
-        token_balances = [{
-            "symbol": "ETH",
-            "balance": eth_balance_in_eth
-        }]
-        
-        # Get ERC-20 tokens
-        network = "api-sepolia"  # Change to mainnet in production
-        token_addresses_to_check = []
-        
         # Method 1: Get token transactions
         tokentx_url = f"https://{network}.etherscan.io/api?module=account&action=tokentx&address={wallet_address}&sort=desc&apikey={ETHERSCAN_API_KEY}"
         response = requests.get(tokentx_url).json()
         
         if response.get('status') == '1' and 'result' in response:
             token_txs = response['result']
+            print(f"Found {len(token_txs)} token transactions")
+            
             # Extract unique token addresses from transactions
             for tx in token_txs:
                 if 'contractAddress' in tx and tx['contractAddress']:
                     token_address = Web3.to_checksum_address(tx['contractAddress'])
-                    if token_address not in token_addresses_to_check:
-                        token_addresses_to_check.append(token_address)
+                    if token_address not in token_addresses:
+                        token_addresses.append(token_address)
         
         # Method 2: Try the tokenlist API too
         tokenlist_url = f"https://{network}.etherscan.io/api?module=account&action=tokenlist&address={wallet_address}&apikey={ETHERSCAN_API_KEY}"
         tokenlist_response = requests.get(tokenlist_url).json()
         
         if tokenlist_response.get('status') == '1' and 'result' in tokenlist_response:
-            for token in tokenlist_response['result']:
-                if 'contractAddress' in token and token['contractAddress']:
-                    token_address = Web3.to_checksum_address(token['contractAddress'])
-                    if token_address not in token_addresses_to_check:
-                        token_addresses_to_check.append(token_address)
+            tokens_data = tokenlist_response['result']
+            
+            for token_data in tokens_data:
+                try:
+                    if 'contractAddress' in token_data and token_data['contractAddress']:
+                        token_address = Web3.to_checksum_address(token_data['contractAddress'])
+                        if token_address not in token_addresses:
+                            token_addresses.append(token_address)
+                except Exception as e:
+                    print(f"Error processing tokenlist data: {str(e)}")
+    except Exception as e:
+        print(f"Error fetching token data from Etherscan: {str(e)}")
         
-        # Check balances for each token
+    return token_addresses
+
+# AI Agent Functions
+
+# Tool: Get wallet tokens
+def get_wallet_tokens(wallet_address: str = None) -> List[Dict[str, Any]]:
+    """Fetches ERC-20 token balances from the user's wallet"""
+    if not wallet_address:
+        return []
+    
+    # Make sure the address is in checksum format
+    try:
+        wallet_address = Web3.to_checksum_address(wallet_address)
+    except:
+        print(f"Invalid wallet address: {wallet_address}")
+        return []
+        
+    wallet_tokens = []
+    
+    # Add ETH balance
+    try:
+        eth_balance = w3.eth.get_balance(wallet_address)
+        eth_balance_in_eth = eth_balance / 10**18  # Convert from wei to ETH
+        
+        if eth_balance_in_eth > 0:
+            wallet_tokens.append({
+                "symbol": "ETH",
+                "name": "Ethereum",
+                "balance": eth_balance_in_eth,
+                "decimals": 18,
+                "address": None  # Native ETH has no contract address
+            })
+    except Exception as e:
+        print(f"Error getting ETH balance: {str(e)}")
+    
+    try:
+        # Get all token addresses for this wallet using our helper function
+        token_addresses_to_check = _fetch_token_addresses(wallet_address)
+        
+        # Process each token
         for token_address in token_addresses_to_check:
             try:
-                token_contract = w3.eth.contract(address=token_address, abi=ERC20_ABI)
-                symbol = token_contract.functions.symbol().call()
-                decimals = token_contract.functions.decimals().call()
-                balance_wei = token_contract.functions.balanceOf(wallet_address).call()
-                balance = balance_wei / (10 ** decimals)
+                token_contract = w3.eth.contract(
+                    address=token_address,
+                    abi=ERC20_ABI
+                )
                 
-                # Only include tokens with non-zero balance
+                # Get token info using contract calls
+                symbol = token_contract.functions.symbol().call()
+                name = None
+                try:
+                    name = token_contract.functions.name().call()
+                except:
+                    name = symbol  # Fallback to symbol if name isn't available
+                
+                decimals = token_contract.functions.decimals().call()
+                balance_raw = token_contract.functions.balanceOf(wallet_address).call()
+                balance = balance_raw / (10 ** decimals)
+                
+                # Only add tokens with non-zero balance
                 if balance > 0:
-                    token_balances.append({
+                    wallet_tokens.append({
                         "symbol": symbol,
-                        "balance": balance
+                        "name": name or symbol,
+                        "balance": balance,
+                        "decimals": decimals,
+                        "address": token_address
                     })
             except Exception as e:
                 print(f"Error getting token data for {token_address}: {str(e)}")
                 continue
         
-        return token_balances
+        return wallet_tokens
     except Exception as e:
         print(f"Error in get_wallet_tokens: {str(e)}")
-        return []
+        return wallet_tokens  # Return any tokens we found before the error
 
 # Tool: Get live token prices
 def get_live_prices(symbols: List[str]) -> Dict[str, float]:
@@ -747,13 +705,15 @@ def portfolio_agent():
                     elif function_name == "get_trending_tokens":
                         function_response = get_trending_tokens()
                     
-                    # Add the function response to messages
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": function_name,
-                        "content": json.dumps(function_response)
-                    })
+                    # Add any function responses to our answer content
+                    if function_response:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": function_name,
+                            "content": json.dumps(function_response)
+                        })
+
                     
                     # For portfolio analysis, store relevant data to return to frontend
                     if function_name == "get_wallet_tokens":
